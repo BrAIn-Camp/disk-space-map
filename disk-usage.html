@@ -168,7 +168,8 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
 <div class="wrap">
   <div id="missing" class="card">
     <h1>No scan data yet</h1>
-    <p class="sub">Run <code>python scan_disk.py</code> in this folder, then reload this page.</p>
+    <p class="sub">This page is the template. Run <code>DiskSpaceMap.exe</code> or <code>python scan_disk.py</code>
+      to scan a drive; it saves your map as <code>disk-map-C.html</code> and opens it.</p>
   </div>
 
   <div id="app">
@@ -550,7 +551,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
     notes.push(nf.format(D.stats.cloud_files) + ' online-only cloud files (' + fmt(D.stats.cloud_bytes) +
       ', e.g. OneDrive "Files On-Demand") were left out because they are not stored on this disk.');
   }
-  notes.push('To refresh, run python scan_disk.py ' + D.drive + ' in this folder and reload the page.');
+  notes.push('To refresh, run DiskSpaceMap.exe (or python scan_disk.py ' + D.drive + ') again; it saves a new copy of this page.');
   for (const n of notes) $('#notes').append(el('li', null, n));
 
   render();

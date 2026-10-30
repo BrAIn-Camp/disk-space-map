@@ -1,15 +1,21 @@
-"""Scan a drive and write disk-data.js, then open disk-usage.html to explore it.
+"""Scan a drive and open an interactive map of what is using the space.
 
-Usage:  python scan_disk.py [DRIVE] [OUT_DIR]
+Usage:  python scan_disk.py [DRIVE] [--out FOLDER] [--no-open]
         e.g. python scan_disk.py D:
+
+Writes one self-contained page, disk-map-<letter>.html, next to this script
+(or next to DiskSpaceMap.exe when built with PyInstaller) and opens it.
 """
+import argparse
 import heapq
 import json
 import os
 import pathlib
 import shutil
 import sys
+import tempfile
 import time
+import traceback
 import webbrowser
 
 FILE_ATTRIBUTE_DIRECTORY = 0x10
@@ -20,6 +26,8 @@ LINK_TAGS = {0xA0000003, 0xA000000C}  # junctions and symlinks: following them d
 
 KEEP = 25 * 1024**2  # folders/files smaller than this fold into "(smaller items)"
 TOP_FILES = 300
+TEMPLATE = "disk-usage.html"
+DATA_TAG = '<script src="disk-data.js"></script>'  # replaced by the scan results
 
 stats = dict(files=0, dirs=0, cloud_files=0, cloud_bytes=0, links_skipped=0, bytes=0)
 denied = []
@@ -116,19 +124,10 @@ def scan(path, name):
     return node
 
 
-def main():
-    sys.setrecursionlimit(20000)
-    drive = (sys.argv[1] if len(sys.argv) > 1 else os.environ.get("SystemDrive", "C:")).rstrip("\\/")
-    if not drive.endswith(":"):
-        drive += ":"
-    here = os.path.dirname(os.path.abspath(__file__))
-    out_dir = sys.argv[2] if len(sys.argv) > 2 else here
-    started = time.time()
-    print(f"Scanning {drive}\\ ...", flush=True)
-    root = scan("\\\\?\\" + drive + "\\", drive)
+def summarise(root, drive, started):
     usage = shutil.disk_usage(drive + "\\")
 
-    # Space Windows reports as used but we could not see (no admin rights:
+    # Space Windows reports as used that we could not see (no admin rights:
     # restore points, other users' folders, system metadata). Hard links in
     # C:\Windows can push the scanned total above "used", hence the guard.
     hidden = usage.used - root["s"]
@@ -138,7 +137,7 @@ def main():
         root["c"].sort(key=lambda k: k["s"], reverse=True)
         root["s"] += hidden
 
-    data = {
+    return {
         "drive": drive,
         "scanned_at": time.strftime("%Y-%m-%d %H:%M"),
         "seconds": round(time.time() - started),
@@ -152,17 +151,74 @@ def main():
         "biggest": [[clean(p), s] for s, p in sorted(biggest, reverse=True)],
         "tree": root,
     }
-    out = os.path.join(out_dir, "disk-data.js")
-    with open(out, "w", encoding="utf-8") as f:
-        f.write("window.DISK_DATA = ")
-        json.dump(data, f, separators=(",", ":"))
-        f.write(";\n")
-    print(f"Done in {data['seconds']}s: {stats['files']:,} files, "
-          f"{stats['bytes'] / 1024**3:.1f} GB readable, {len(denied):,} folders denied -> {out}", flush=True)
-    page = os.path.join(out_dir, "disk-usage.html")
-    if os.path.exists(page):
-        webbrowser.open(pathlib.Path(page).as_uri())
+
+
+def write_page(data, template, out_dir):
+    with open(template, encoding="utf-8") as f:
+        page = f.read()
+    if DATA_TAG not in page:
+        raise RuntimeError(f"{template} is missing the {DATA_TAG} placeholder")
+    # "<" is escaped so no file name can close the <script> tag early.
+    payload = json.dumps(data, separators=(",", ":")).replace("<", "\\u003c")
+    page = page.replace(DATA_TAG, "<script>window.DISK_DATA = " + payload + ";</script>", 1)
+    name = f"disk-map-{data['drive'].rstrip(':')}.html"
+    try:
+        out = os.path.join(out_dir, name)
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(page)
+    except OSError:  # e.g. the exe sits in a read-only folder
+        out = os.path.join(tempfile.gettempdir(), name)
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(page)
+    return out
+
+
+def main(ask_for_drive):
+    sys.setrecursionlimit(20000)
+    frozen = getattr(sys, "frozen", False)
+    here = os.path.dirname(sys.executable if frozen else os.path.abspath(__file__))
+    bundle = getattr(sys, "_MEIPASS", here)  # where PyInstaller unpacks TEMPLATE
+    system_drive = os.environ.get("SystemDrive", "C:")
+
+    parser = argparse.ArgumentParser(description="Scan a drive and open a map of what is using the space.")
+    parser.add_argument("drive", nargs="?", help=f"drive to scan, e.g. D: (default {system_drive})")
+    parser.add_argument("--out", default=here, help="folder to save the map in (default: next to this program)")
+    parser.add_argument("--no-open", action="store_true", help="don't open the map in a browser")
+    args = parser.parse_args()
+
+    drive = args.drive
+    if drive is None and ask_for_drive:
+        drive = input(f"Drive to scan (press Enter for {system_drive}): ")
+    drive = (drive or "").strip().rstrip("\\/").upper() or system_drive
+    if not drive.endswith(":"):
+        drive += ":"
+    if not os.path.isdir(drive + "\\"):
+        print(f"Can't find drive {drive}")
+        return 1
+
+    started = time.time()
+    print(f"Scanning {drive}\\ - this usually takes a minute or two...", flush=True)
+    root = scan("\\\\?\\" + drive + "\\", drive)
+    data = summarise(root, drive, started)
+    out = write_page(data, os.path.join(bundle, TEMPLATE), args.out)
+    print(f"Done in {data['seconds']}s: {stats['files']:,} files, {data['free'] / 1024**3:.1f} GB free "
+          f"of {data['total'] / 1024**3:.1f} GB.\nSaved the map to {out}", flush=True)
+    if not args.no_open:
+        print("Opening it in your browser...")
+        webbrowser.open(pathlib.Path(out).as_uri())
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    # A double-clicked exe runs in its own console window: ask which drive to
+    # scan, and keep the window open at the end so the summary can be read.
+    double_clicked = (getattr(sys, "frozen", False) and len(sys.argv) == 1
+                      and sys.stdin is not None and sys.stdin.isatty())
+    try:
+        code = main(double_clicked)
+    except Exception:
+        traceback.print_exc()
+        code = 1
+    if double_clicked:
+        input("\nPress Enter to close...")
+    sys.exit(code)

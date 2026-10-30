@@ -1,5 +1,11 @@
 # Scan results: your own folder and file names, keep them out of the repo
+disk-map-*.html
 disk-data.js
+
+# PyInstaller output
+build/
+dist/
+*.spec
 
 .claude/
 __pycache__/
