@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Disk Space Map</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb;
+  --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+  --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100;
+  --c5: #e87ba4; --c6: #008300; --c7: #6250d6; --c8: #e34948;
+  --neutral: #a8a7a0; --seq: #2a78d6; --critical: #d03b3b; --good: #0ca30c;
+  --tip-bg: #0b0b0b; --tip-ink: #f0efec;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19;
+    --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500;
+    --c5: #d55181; --c6: #008300; --c7: #9085e9; --c8: #e66767;
+    --neutral: #6b6a65; --seq: #3987e5;
+    --tip-bg: #f0efec; --tip-ink: #0b0b0b;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19;
+  --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+  --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500;
+  --c5: #d55181; --c6: #008300; --c7: #9085e9; --c8: #e66767;
+  --neutral: #6b6a65; --seq: #3987e5;
+  --tip-bg: #f0efec; --tip-ink: #0b0b0b;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--page); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.wrap { max-width: 1440px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 22px; margin: 0 0 4px; font-weight: 650; }
+h2 { font-size: 15px; margin: 0 0 12px; font-weight: 650; }
+.sub { color: var(--ink-2); margin: 0; }
+.muted { color: var(--muted); }
+.num { font-variant-numeric: tabular-nums; }
+.card { background: var(--surface); border: 1px solid var(--ring); border-radius: 10px; padding: 16px; }
+
+/* headline */
+.head { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) auto; align-items: end; margin-bottom: 16px; }
+.stats { display: flex; gap: 28px; flex-wrap: wrap; }
+.stat .v { font-size: 26px; font-weight: 650; line-height: 1.1; }
+.stat .l { color: var(--ink-2); font-size: 12px; }
+.meter { margin-top: 14px; height: 10px; border-radius: 5px; background: var(--grid); overflow: hidden; display: flex; gap: 2px; }
+.meter .used { background: var(--seq); border-radius: 5px 0 0 5px; }
+.meter.low .used { background: var(--critical); }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; color: var(--ink); }
+.chip svg { flex: none; }
+
+/* explorer */
+.explorer { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 340px; margin-top: 16px; }
+.bar-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; flex: 1; }
+.crumbs button, .btn {
+  font: inherit; color: var(--ink); background: none; border: 1px solid transparent;
+  padding: 3px 8px; border-radius: 6px; cursor: pointer;
+}
+.crumbs button:hover, .btn:hover { background: var(--grid); }
+.crumbs button[aria-current] { font-weight: 650; cursor: default; background: none; }
+.crumbs .sep { color: var(--muted); }
+.btn { border-color: var(--axis); }
+.btn:disabled { opacity: .4; cursor: default; background: none; }
+.hint { color: var(--muted); font-size: 12px; }
+
+#map { position: relative; height: clamp(360px, 64vh, 760px); border-radius: 6px; overflow: hidden; }
+#map .g, #map .t { position: absolute; overflow: hidden; border-radius: 4px; }
+#map .g { background: color-mix(in srgb, var(--col) 13%, var(--surface)); border-top: 3px solid var(--col); cursor: pointer; }
+#map .g .h { padding: 1px 6px; font-size: 12px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#map .g .h span { font-weight: 400; color: var(--ink-2); }
+#map .t {
+  background: color-mix(in srgb, var(--col) 42%, var(--surface)); padding: 3px 6px;
+  font-size: 12px; line-height: 1.25; cursor: pointer;
+}
+#map .t.top { border-top: 3px solid var(--col); }
+#map .t.leaf { cursor: default; }
+#map .t.other { background: color-mix(in srgb, var(--col) 22%, var(--surface)); }
+#map .t.locked {
+  background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--neutral) 40%, var(--surface)) 0 6px,
+    color-mix(in srgb, var(--neutral) 22%, var(--surface)) 6px 12px);
+}
+#map .t:hover, #map .t:focus-visible { background-color: color-mix(in srgb, var(--col) 65%, var(--surface)); outline: 2px solid var(--ink); outline-offset: -2px; z-index: 2; }
+#map .g:hover { outline: 2px solid var(--ink); outline-offset: -2px; }
+#map .t .nm { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#map .t .sz { color: var(--ink-2); white-space: nowrap; }
+#map .empty { padding: 24px; color: var(--ink-2); }
+
+.side h2 { margin-bottom: 2px; word-break: break-all; }
+.side .meta { color: var(--ink-2); font-size: 12px; margin-bottom: 12px; }
+.list { display: flex; flex-direction: column; gap: 2px; max-height: calc(clamp(360px, 64vh, 760px) - 40px); overflow: auto; margin: 0 -6px; }
+.row {
+  display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 4px 8px; align-items: center;
+  font: inherit; color: inherit; text-align: left; background: none; border: 0; padding: 6px; border-radius: 6px; cursor: pointer;
+}
+.row:hover, .row:focus-visible { background: var(--grid); }
+.row.nodrill { cursor: default; }
+.row .sw { width: 10px; height: 10px; border-radius: 2px; background: var(--col); }
+.row .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .sz { font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: 12px; text-align: right; }
+.row .track { grid-column: 2 / 4; height: 6px; background: var(--grid); border-radius: 3px; overflow: hidden; }
+.row .fill { height: 100%; background: var(--col); border-radius: 3px; }
+.row.locked .sw { background: repeating-linear-gradient(45deg, var(--neutral) 0 2px, transparent 2px 4px); }
+
+/* lower panels */
+.lower { display: grid; gap: 16px; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); margin-top: 16px; }
+table { border-collapse: collapse; width: 100%; }
+th { text-align: left; font-weight: 600; color: var(--ink-2); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--axis); position: sticky; top: 0; background: var(--surface); }
+td { padding: 6px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+td.r, th.r { text-align: right; white-space: nowrap; }
+.scroll { max-height: 520px; overflow: auto; }
+.fname { font-weight: 600; word-break: break-all; }
+.fdir { color: var(--muted); font-size: 12px; word-break: break-all; }
+.copy { font: inherit; font-size: 12px; color: var(--ink-2); background: none; border: 1px solid var(--axis); border-radius: 5px; padding: 1px 6px; cursor: pointer; }
+.copy:hover { background: var(--grid); }
+
+.types { display: flex; flex-direction: column; gap: 8px; }
+.type { display: grid; grid-template-columns: 110px minmax(0, 1fr) 84px; gap: 10px; align-items: center; }
+.type .ext { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.type .track { height: 14px; }
+.type .fill { height: 100%; background: var(--seq); border-radius: 0 4px 4px 0; min-width: 2px; }
+.type .v { text-align: right; font-variant-numeric: tabular-nums; }
+.type .v small { display: block; color: var(--muted); font-size: 11px; }
+
+.notes { margin-top: 16px; }
+.notes ul { margin: 0; padding-left: 18px; color: var(--ink-2); }
+.notes li { margin: 4px 0; }
+code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: var(--grid); padding: 1px 5px; border-radius: 4px; }
+
+#tip {
+  position: fixed; pointer-events: none; z-index: 10; max-width: 380px;
+  background: var(--tip-bg); color: var(--tip-ink); border-radius: 8px; padding: 8px 10px;
+  font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.18); display: none;
+}
+#tip .v { font-size: 16px; font-weight: 700; }
+#tip .p { opacity: .75; word-break: break-all; margin-top: 2px; }
+#tip .x { margin-top: 4px; opacity: .9; }
+
+#missing { display: none; }
+
+@media (max-width: 980px) {
+  .explorer, .lower { grid-template-columns: minmax(0, 1fr); }
+  .list { max-height: 420px; }
+}
+@media (max-width: 560px) {
+  .head { grid-template-columns: minmax(0, 1fr); }
+  .stats { gap: 18px; }
+  .stat .v { font-size: 22px; }
+  .type { grid-template-columns: 76px minmax(0, 1fr) 72px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="missing" class="card">
+    <h1>No scan data yet</h1>
+    <p class="sub">Run <code>python scan_disk.py</code> in this folder, then reload this page.</p>
+  </div>
+
+  <div id="app">
+    <div class="head">
+      <div>
+        <h1 id="title">Disk space</h1>
+        <p class="sub" id="subtitle"></p>
+      </div>
+      <div id="status"></div>
+    </div>
+
+    <div class="card">
+      <div class="stats" id="stats"></div>
+      <div class="meter" id="meter" role="img"></div>
+    </div>
+
+    <div class="explorer">
+      <div class="card">
+        <div class="bar-row">
+          <button class="btn" id="up" title="Up one folder (Backspace)">&larr; Up</button>
+          <nav class="crumbs" id="crumbs" aria-label="Folder path"></nav>
+          <span class="hint">Click a block to zoom in</span>
+        </div>
+        <div id="map"></div>
+      </div>
+      <div class="card side">
+        <h2 id="here"></h2>
+        <div class="meta" id="here-meta"></div>
+        <div class="list" id="list"></div>
+      </div>
+    </div>
+
+    <div class="lower">
+      <div class="card">
+        <h2>Largest files</h2>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>File</th><th class="r">Size</th><th></th></tr></thead>
+            <tbody id="files"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Space by file type</h2>
+        <div class="types" id="types"></div>
+      </div>
+    </div>
+
+    <div class="card notes">
+      <h2>About these numbers</h2>
+      <ul id="notes"></ul>
+    </div>
+  </div>
+</div>
+<div id="tip" role="tooltip"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="disk-data.js"></script>
+<script>
+(function () {
+  const D = window.DISK_DATA;
+  const $ = (s) => document.querySelector(s);
+  if (!D) {
+    $('#missing').style.display = 'block';
+    $('#app').style.display = 'none';
+    return;
+  }
+
+  const SLOTS = 8;
+  const HEADER = 20;
+  const nf = new Intl.NumberFormat();
+
+  function fmt(b) {
+    if (b >= 1024 ** 4) return (b / 1024 ** 4).toFixed(2) + ' TB';
+    if (b >= 1024 ** 3) return (b / 1024 ** 3).toFixed(1) + ' GB';
+    if (b >= 1024 ** 2) return Math.round(b / 1024 ** 2) + ' MB';
+    if (b >= 1024) return Math.round(b / 1024) + ' KB';
+    return b + ' B';
+  }
+  function pct(a, b) {
+    const p = (a / b) * 100;
+    if (p >= 10) return p.toFixed(0) + '%';
+    if (p >= 1) return p.toFixed(1) + '%';
+    return p >= 0.01 ? p.toFixed(2) + '%' : '<0.01%';
+  }
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function joinPath(base, name) { return base.endsWith('\\') ? base + name : base + '\\' + name; }
+
+  /* ---------- headline ---------- */
+  const low = D.free / D.total < 0.1;
+  $('#title').textContent = D.drive + ' drive';
+  $('#subtitle').textContent = 'Scanned ' + D.scanned_at + ' in ' + D.seconds + 's';
+  const stats = [
+    [fmt(D.free), 'free (' + pct(D.free, D.total) + ')'],
+    [fmt(D.used), 'used of ' + fmt(D.total)],
+    [nf.format(D.stats.files), 'files scanned'],
+  ];
+  for (const [v, l] of stats) {
+    const s = el('div', 'stat');
+    s.append(el('div', 'v', v), el('div', 'l', l));
+    $('#stats').append(s);
+  }
+  const meter = $('#meter');
+  meter.classList.toggle('low', low);
+  meter.setAttribute('aria-label', fmt(D.used) + ' used, ' + fmt(D.free) + ' free');
+  const used = el('div', 'used');
+  used.style.width = (D.used / D.total) * 100 + '%';
+  meter.append(used);
+  if (low) {
+    const chip = el('div', 'chip');
+    chip.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1z" fill="var(--critical)"/><path d="M8 6v4" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.8" r=".9" fill="#fff"/></svg>';
+    chip.append(document.createTextNode('Critically low on space'));
+    $('#status').append(chip);
+  }
+
+  /* ---------- explorer ---------- */
+  const stack = [D.tree];
+  const tip = $('#tip');
+  const info = new WeakMap();
+  const isSpecial = (n) => n.o || n.u;
+
+  function curPath() {
+    return stack.length === 1 ? D.drive + '\\' : stack.map((n) => n.n).join('\\');
+  }
+  function slotMap(node) {
+    const m = new Map();
+    let i = 0;
+    for (const c of node.c || []) if (!isSpecial(c) && i < SLOTS) m.set(c, i++);
+    return m;
+  }
+  function colorOf(c, slots) {
+    const i = slots.get(c);
+    return i === undefined ? 'var(--neutral)' : 'var(--c' + (i + 1) + ')';
+  }
+  // A folder that is (almost) all one subfolder, like Users -> <your name>, is
+  // shown as "Users\<your name>" so the map opens on something worth looking at.
+  function chainOf(n) {
+    const chain = [n];
+    let end = n;
+    while (end.c && end.c[0].c && end.c[0].s >= end.s * 0.99) {
+      end = end.c[0];
+      chain.push(end);
+    }
+    return chain;
+  }
+  function describe(n, path, parentSize, name) {
+    let kind = n.k ? 'File' : 'Folder';
+    let extra = '';
+    if (n.o) { kind = 'Many smaller items'; extra = 'Files and folders under 25 MB each, added together.'; }
+    if (n.u) { kind = 'Protected space'; extra = 'Windows counts this as used, but reading it needs admin rights: System Restore points, other user accounts and protected system data.'; }
+    return { n, path, kind, extra, parentSize, name: name || n.n };
+  }
+  function drill(chain) {
+    for (const n of chain) stack.push(n);
+    render();
+  }
+
+  function renderCrumbs() {
+    const nav = $('#crumbs');
+    nav.replaceChildren();
+    stack.forEach((n, i) => {
+      if (i) nav.append(el('span', 'sep', '\\'));
+      const b = el('button', null, i === 0 ? D.drive + '\\' : n.n);
+      if (i === stack.length - 1) b.setAttribute('aria-current', 'page');
+      else b.onclick = () => { stack.length = i + 1; render(); };
+      nav.append(b);
+    });
+    $('#up').disabled = stack.length === 1;
+  }
+
+  function place(e, r) {
+    e.style.left = r.x0 + 'px';
+    e.style.top = r.y0 + 'px';
+    e.style.width = Math.max(0, r.x1 - r.x0) + 'px';
+    e.style.height = Math.max(0, r.y1 - r.y0) + 'px';
+  }
+  function label(e, n, w, h) {
+    if (w >= 56 && h >= 34) {
+      e.append(el('div', 'nm', n.n), el('div', 'sz', fmt(n.s)));
+    } else if (w >= 40 && h >= 18) {
+      e.append(el('div', 'nm', n.n));
+    }
+  }
+
+  function renderMap() {
+    const node = stack[stack.length - 1];
+    const map = $('#map');
+    map.replaceChildren();
+    if (!node.c) {
+      map.append(el('div', 'empty', 'Everything in here is smaller than 25 MB, so there is nothing bigger to show.'));
+      return;
+    }
+    const W = map.clientWidth, H = map.clientHeight;
+    const slots = slotMap(node);
+    const shallow = {
+      kids: node.c.map((ch) => {
+        const chain = chainOf(ch);
+        const end = chain[chain.length - 1];
+        return { src: ch, chain, end, s: end.s, kids: end.c ? end.c.map((g) => ({ src: g, s: g.s })) : null };
+      }),
+    };
+    const root = d3.hierarchy(shallow, (d) => d.kids).sum((d) => (d.kids ? 0 : d.s));
+    const isGroup = (d) => d.depth === 1 && d.children;
+    d3.treemap()
+      .tile(d3.treemapSquarify.ratio(1.3))
+      .size([W, H]).round(true)
+      .paddingInner(3)
+      .paddingTop((d) => (isGroup(d) ? HEADER : 0))
+      .paddingLeft((d) => (isGroup(d) ? 3 : 0))
+      .paddingRight((d) => (isGroup(d) ? 3 : 0))
+      .paddingBottom((d) => (isGroup(d) ? 3 : 0))(root);
+
+    const base = curPath();
+    for (const g of root.children || []) {
+      const { src, chain, end } = g.data;
+      const col = colorOf(src, slots);
+      const name = chain.map((n) => n.n).join('\\');
+      const gpath = joinPath(base, name);
+      const w = g.x1 - g.x0, h = g.y1 - g.y0;
+      if (g.children) {
+        const box = el('div', 'g');
+        box.style.setProperty('--col', col);
+        place(box, g);
+        if (w >= 44) {
+          const hd = el('div', 'h', name + ' ');
+          if (w >= 110) hd.append(el('span', null, fmt(end.s)));
+          box.append(hd);
+        }
+        box.onclick = () => drill(chain);
+        info.set(box, describe(end, gpath, node.s, name));
+        map.append(box);
+        for (const t of g.children) {
+          const tsrc = t.data.src;
+          const tile = el('div', 't');
+          tile.style.setProperty('--col', col);
+          if (tsrc.o) tile.classList.add('other');
+          place(tile, t);
+          label(tile, tsrc, t.x1 - t.x0, t.y1 - t.y0);
+          tile.onclick = (ev) => { ev.stopPropagation(); drill(tsrc.c ? [...chain, tsrc] : chain); };
+          info.set(tile, describe(tsrc, tsrc.o ? gpath : joinPath(gpath, tsrc.n), end.s));
+          map.append(tile);
+        }
+      } else {
+        const tile = el('div', 't top');
+        tile.style.setProperty('--col', col);
+        if (src.o) tile.classList.add('other');
+        if (src.u) tile.classList.add('locked');
+        if (!src.c) tile.classList.add('leaf');
+        place(tile, g);
+        label(tile, src, w, h);
+        info.set(tile, describe(src, src.o || src.u ? base : gpath, node.s));
+        map.append(tile);
+      }
+    }
+  }
+
+  function renderList() {
+    const node = stack[stack.length - 1];
+    $('#here').textContent = curPath();
+    $('#here-meta').textContent = fmt(node.s) + ' · ' + pct(node.s, D.used) + ' of used space · ' +
+      nf.format(node.f) + ' files';
+    const list = $('#list');
+    list.replaceChildren();
+    const slots = slotMap(node);
+    const kids = node.c || [];
+    for (const c of kids) {
+      const row = el('button', 'row');
+      row.style.setProperty('--col', colorOf(c, slots));
+      if (c.u) row.classList.add('locked');
+      if (!c.c) row.classList.add('nodrill');
+      const track = el('div', 'track');
+      const fill = el('div', 'fill');
+      fill.style.width = (c.s / kids[0].s) * 100 + '%';
+      track.append(fill);
+      row.append(el('span', 'sw'), el('span', 'nm', c.n), el('span', 'sz', fmt(c.s) + ' · ' + pct(c.s, node.s)), track);
+      row.title = c.k ? 'File' : c.c ? 'Open ' + c.n : c.n;
+      if (c.c) row.onclick = () => drill(chainOf(c));
+      info.set(row, describe(c, isSpecial(c) ? curPath() : joinPath(curPath(), c.n), node.s));
+      list.append(row);
+    }
+    if (!kids.length) list.append(el('div', 'muted', 'No items of 25 MB or more in here.'));
+  }
+
+  function render() {
+    tip.style.display = 'none';
+    renderCrumbs();
+    renderMap();
+    renderList();
+  }
+
+  /* tooltip */
+  function showTip(target, x, y) {
+    const d = info.get(target);
+    if (!d) { tip.style.display = 'none'; return; }
+    tip.replaceChildren(
+      el('div', 'v', fmt(d.n.s)),
+      el('div', null, d.kind + (d.n.o || d.n.u ? '' : ': ' + d.name)),
+      el('div', 'p', d.path),
+      el('div', 'x', pct(d.n.s, D.used) + ' of used space · ' + pct(d.n.s, d.parentSize) + ' of its folder' +
+        (d.n.f ? ' · ' + nf.format(d.n.f) + ' files' : ''))
+    );
+    if (d.extra) tip.append(el('div', 'x', d.extra));
+    tip.style.display = 'block';
+    const r = tip.getBoundingClientRect();
+    let left = x + 14, top = y + 14;
+    if (left + r.width > innerWidth - 8) left = x - r.width - 14;
+    if (top + r.height > innerHeight - 8) top = y - r.height - 14;
+    tip.style.left = Math.max(8, left) + 'px';
+    tip.style.top = Math.max(8, top) + 'px';
+  }
+  for (const area of [$('#map'), $('#list')]) {
+    area.addEventListener('pointermove', (ev) => {
+      const t = ev.target.closest('.t, .g, .row');
+      if (t) showTip(t, ev.clientX, ev.clientY); else tip.style.display = 'none';
+    });
+    area.addEventListener('pointerleave', () => { tip.style.display = 'none'; });
+  }
+
+  $('#up').onclick = () => { if (stack.length > 1) { stack.pop(); render(); } };
+  document.addEventListener('keydown', (ev) => {
+    if ((ev.key === 'Backspace' || ev.key === 'Escape') && stack.length > 1) {
+      ev.preventDefault();
+      stack.pop();
+      render();
+    }
+  });
+  let raf = 0;
+  new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(renderMap); }).observe($('#map'));
+
+  /* ---------- largest files ---------- */
+  const tbody = $('#files');
+  for (const [path, size] of D.biggest.slice(0, 100)) {
+    const tr = el('tr');
+    const i = path.lastIndexOf('\\');
+    const cell = el('td');
+    cell.append(el('div', 'fname', path.slice(i + 1)), el('div', 'fdir', path.slice(0, i + 1)));
+    const copy = el('button', 'copy', 'Copy path');
+    copy.onclick = async () => {
+      try { await navigator.clipboard.writeText(path); copy.textContent = 'Copied'; }
+      catch (e) { copy.textContent = 'Copy failed'; }
+      setTimeout(() => { copy.textContent = 'Copy path'; }, 1500);
+    };
+    const c3 = el('td', 'r');
+    c3.append(copy);
+    tr.append(cell, el('td', 'r num', fmt(size)), c3);
+    tbody.append(tr);
+  }
+
+  /* ---------- file types ---------- */
+  const types = $('#types');
+  const topTypes = D.exts.slice(0, 16);
+  const maxT = topTypes.length ? topTypes[0][1] : 1;
+  for (const [ext, bytes, count] of topTypes) {
+    const row = el('div', 'type');
+    row.title = ext + ': ' + fmt(bytes) + ' in ' + nf.format(count) + ' files';
+    const track = el('div', 'track');
+    const fill = el('div', 'fill');
+    fill.style.width = (bytes / maxT) * 100 + '%';
+    track.append(fill);
+    const v = el('div', 'v', fmt(bytes));
+    v.append(el('small', null, nf.format(count) + ' files'));
+    row.append(el('div', 'ext', ext), track, v);
+    types.append(row);
+  }
+
+  /* ---------- notes ---------- */
+  const notes = [
+    'Folders and files under 25 MB are grouped as "(smaller items)" to keep the map readable.',
+    'Hatched block: space Windows reports as used that this scan could not read without admin rights (' +
+      nf.format(D.denied_count) + ' folders were not readable). This is usually System Restore points and protected system data.',
+    'Shortcuts, junctions and symlinks were skipped so nothing is counted twice. Some files inside C:\\Windows share storage (hard links), so that folder can look slightly bigger than it is.',
+  ];
+  if (D.stats.cloud_files) {
+    notes.push(nf.format(D.stats.cloud_files) + ' online-only cloud files (' + fmt(D.stats.cloud_bytes) +
+      ', e.g. OneDrive "Files On-Demand") were left out because they are not stored on this disk.');
+  }
+  notes.push('To refresh, run python scan_disk.py ' + D.drive + ' in this folder and reload the page.');
+  for (const n of notes) $('#notes').append(el('li', null, n));
+
+  render();
+})();
+</script>
+</body>
+</html>

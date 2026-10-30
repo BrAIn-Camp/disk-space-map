@@ -1,0 +1,5 @@
+# Scan results: your own folder and file names, keep them out of the repo
+disk-data.js
+
+.claude/
+__pycache__/
