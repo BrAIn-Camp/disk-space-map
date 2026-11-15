@@ -533,6 +533,24 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
     if (n.u) { kind = 'Protected space'; extra = 'Windows counts this as used, but reading it needs admin rights: System Restore points, other user accounts and protected system data.'; }
     return { n, path, kind, extra, parentSize, name: name || n.n };
   }
+  // Moves the map to the given folder, right here in this tab. Folders too small to be on the map
+  // (folded into "smaller items") can't be shown, so it stops at the deepest one that is.
+  function showInMap(dirPath) {
+    const rel = relPath(dirPath);
+    if (rel !== '.' && rel === dirPath) { toast('That folder is outside this scan.'); return; }
+    const same = (a, b) => (SEP === '\\' ? a.toLowerCase() === b.toLowerCase() : a === b);
+    const path = [D.tree];
+    let reached = true;
+    for (const seg of rel === '.' ? [] : rel.split(SEP).filter(Boolean)) {
+      const next = (path[path.length - 1].c || []).find((c) => !c.k && !c.o && !c.u && same(c.n, seg));
+      if (!next) { reached = false; break; }
+      path.push(next);
+    }
+    stack.splice(0, stack.length, ...path);
+    render();
+    $('#map').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (!reached) toast('That folder is smaller than ' + fmt(MIN) + ', so this is the closest folder on the map.');
+  }
   function drill(chain) {
     for (const n of chain) stack.push(n);
     render();
@@ -827,6 +845,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
     const launch = (s) => () => post('/api/shell', { path: dir, shell: s.id });
     const items = [];
     if (!d.noOpen) items.push({ label: isFile ? 'Open file' : 'Open', bold: true, disabled: !go, run: go });
+    if (isFile) items.push({ label: 'Open containing folder', run: () => showInMap(dir) });
     items.push(
       { label: 'Open ' + where + 'in new tab', hint: MOD + '+click', run: () => openScan(dir, 'tab') },
       { label: 'Open ' + where + 'in new window', hint: 'Shift+click', run: () => openScan(dir, 'window') },
