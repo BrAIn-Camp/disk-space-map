@@ -192,6 +192,16 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
 .ctx .hr { height: 1px; background: var(--grid); margin: 4px 2px; }
 .ctx .subm { display: none; position: absolute; left: 100%; top: -5px; }
 .ctx .it.open > .subm { display: block; }
+/* preview overlay */
+#pv { position: fixed; inset: 0; z-index: 25; display: none; flex-direction: column; background: rgba(0,0,0,.82); color: #f0efec; }
+#pv.show { display: flex; }
+#pv .bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: rgba(20,20,20,.9); flex-wrap: wrap; }
+#pv .title { min-width: 0; flex: 1; }
+#pv .title b { display: block; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pv .title span { display: block; opacity: .7; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pv button { font: inherit; color: #f0efec; background: none; border: 1px solid rgba(255,255,255,.3); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+#pv button:hover { background: rgba(255,255,255,.14); }
+#pv .stage { flex: 1; min-height: 0; padding: 12px; }
 #toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 30; display: none;
   background: var(--tip-bg); color: var(--tip-ink); padding: 8px 14px; border-radius: 8px; font-size: 13px;
@@ -305,6 +315,16 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
   </div>
 </div>
 <div id="tip" role="tooltip"></div>
+<div id="pv" role="dialog" aria-modal="true" aria-label="File preview">
+  <div class="bar">
+    <div class="title"><b id="pv-name"></b><span id="pv-dir"></span></div>
+    <button id="pv-open" title="Open with the default app">Open</button>
+    <button id="pv-tab" title="Preview in a new tab">New tab</button>
+    <button id="pv-close" title="Close (Esc)" aria-label="Close preview">&#10005;</button>
+  </div>
+  <div class="stage" id="pv-stage"></div>
+</div>
+<script src="/viewer.js"></script>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
 <script>
@@ -639,7 +659,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
           label(tile, tsrc, t.x1 - t.x0, t.y1 - t.y0);
           if (tsrc.c) goes.set(tile, () => drill([...chain, tsrc]));
           else if (!tsrc.o && !tsrc.k) goes.set(tile, () => drill(chain));
-          if (tsrc.k) goes.set(tile, openFile(joinPath(gpath, tsrc.n)));
+          if (tsrc.k) goes.set(tile, fileClick(joinPath(gpath, tsrc.n)));
           info.set(tile, describe(tsrc, tsrc.o ? gpath : joinPath(gpath, tsrc.n), end.s));
           map.append(tile);
         }
@@ -649,7 +669,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
         if (src.o) tile.classList.add('other');
         if (src.u) tile.classList.add('locked');
         if (!src.c && !src.k) tile.classList.add('leaf');
-        if (src.k) goes.set(tile, openFile(gpath));
+        if (src.k) goes.set(tile, fileClick(gpath));
         place(tile, g);
         label(tile, src, w, h);
         info.set(tile, describe(src, src.o || src.u ? base : gpath, node.s));
@@ -679,7 +699,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
       row.append(el('span', 'sw'), el('span', 'nm', c.n), el('span', 'sz', fmt(c.s) + ' · ' + pct(c.s, node.s)), track);
       row.title = c.k ? 'Open file' : c.c ? 'Open ' + c.n : c.n;
       if (c.c) goes.set(row, () => drill(chainOf(c)));
-      else if (c.k) goes.set(row, openFile(joinPath(curPath(), c.n)));
+      else if (c.k) goes.set(row, fileClick(joinPath(curPath(), c.n)));
       info.set(row, describe(c, isSpecial(c) ? curPath() : joinPath(curPath(), c.n), node.s));
       list.append(row);
     }
@@ -761,6 +781,62 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
       } catch (e) { toast('Could not reach the server.'); }
     };
   }
+  /* ---------- preview (images, video, audio, PDF) ---------- */
+  const previewKind = (path) => {
+    const i = path.lastIndexOf('.');
+    return i > path.lastIndexOf(SEP) ? (caps.preview || {})[path.slice(i).toLowerCase()] : undefined;
+  };
+  let pvViewer = null, pvPath = null;
+  function previewUrl(path) { return '/preview?' + (SID ? 'scan=' + encodeURIComponent(SID) + '&' : '') + 'path=' + encodeURIComponent(path); }
+  function showPreview(path) {
+    const kind = previewKind(path);
+    if (!kind) return false;
+    if (pvViewer) window.DsmViewer.dispose(pvViewer);
+    const cut = path.lastIndexOf(SEP);
+    $('#pv-name').textContent = path.slice(cut + 1);
+    $('#pv-dir').textContent = path.slice(0, cut + 1);
+    pvViewer = window.DsmViewer.create({ scan: SID, path, kind });
+    $('#pv-stage').replaceChildren(pvViewer);
+    if (!pvPath) history.pushState({ preview: true }, ''); // so the browser's Back button closes the preview
+    pvPath = path;
+    closeMenu();
+    tip.style.display = 'none';
+    $('#pv').classList.add('show');
+    $('#pv-close').focus();
+    return true;
+  }
+  function hidePreview(fromHistory) {
+    if (!pvPath) return;
+    window.DsmViewer.dispose(pvViewer);
+    pvViewer = null; pvPath = null;
+    $('#pv-stage').replaceChildren();
+    $('#pv').classList.remove('show');
+    if (!fromHistory) history.back();
+  }
+  // Opens the preview page in its own tab or window.
+  function previewElsewhere(path, mode) {
+    const win = mode === 'window' ? window.open(previewUrl(path), '_blank', 'popup,width=1280,height=860') : window.open(previewUrl(path), '_blank');
+    if (!win) toast('The browser blocked the new ' + mode + '. Allow pop-ups for this page.');
+  }
+  $('#pv-close').onclick = () => hidePreview(false);
+  $('#pv-open').onclick = () => post('/api/open', { path: pvPath });
+  $('#pv-tab').onclick = () => { const p = pvPath; hidePreview(false); previewElsewhere(p, 'tab'); };
+  $('#pv').addEventListener('pointerdown', (ev) => { if (ev.target === $('#pv') || ev.target === $('#pv-stage')) hidePreview(false); });
+  window.addEventListener('popstate', () => hidePreview(true));
+  document.addEventListener('keydown', (ev) => {
+    if (pvPath && ev.key === 'Escape') { ev.preventDefault(); ev.stopImmediatePropagation(); hidePreview(false); }
+  }, true);
+
+  // What a plain click on a file does: preview it if the browser can show it, otherwise open it with its default app.
+  function fileClick(path) {
+    const open = openFile(path);
+    return () => { if (!showPreview(path)) open(); };
+  }
+  // Ctrl/Shift/middle-click on a file: preview in a new tab/window if possible, otherwise the old behavior (scan its folder).
+  function fileElsewhere(path, mode) {
+    if (previewKind(path)) previewElsewhere(path, mode); else openScan(parentOf(path), mode);
+  }
+
   async function copyText(text, what) {
     try { await navigator.clipboard.writeText(text); toast('Copied ' + what); }
     catch (e) { toast('Copy failed'); }
@@ -844,11 +920,17 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
     const shells = caps.shells || [];
     const launch = (s) => () => post('/api/shell', { path: dir, shell: s.id });
     const items = [];
-    if (!d.noOpen) items.push({ label: isFile ? 'Open file' : 'Open', bold: true, disabled: !go, run: go });
+    const canPreview = isFile && !!previewKind(path);
+    if (canPreview) items.push({ label: 'Preview', bold: true, run: () => showPreview(path) });
+    if (!d.noOpen) items.push({ label: isFile ? 'Open file' : 'Open', bold: !canPreview, disabled: !go, run: isFile ? openFile(path) : go });
     if (isFile) items.push({ label: 'Open containing folder', run: () => showInMap(dir) });
+    if (canPreview) items.push(
+      { label: 'Preview in new tab', hint: MOD + '+click', run: () => previewElsewhere(path, 'tab') },
+      { label: 'Preview in new window', hint: 'Shift+click', run: () => previewElsewhere(path, 'window') },
+    );
     items.push(
-      { label: 'Open ' + where + 'in new tab', hint: MOD + '+click', run: () => openScan(dir, 'tab') },
-      { label: 'Open ' + where + 'in new window', hint: 'Shift+click', run: () => openScan(dir, 'window') },
+      { label: 'Open ' + where + 'in new tab', hint: canPreview ? '' : MOD + '+click', run: () => openScan(dir, 'tab') },
+      { label: 'Open ' + where + 'in new window', hint: canPreview ? '' : 'Shift+click', run: () => openScan(dir, 'window') },
       { sep: true },
       { label: caps.fileManager, run: () => post('/api/reveal', { path }) },
       shells.length > 1
@@ -901,15 +983,15 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
     area.addEventListener('click', (ev) => {
       const x = targetOf(ev);
       if (!x?.d) return;
-      if (ev.ctrlKey || ev.metaKey) { ev.preventDefault(); openScan(dirOf(x.d), 'tab'); }
-      else if (ev.shiftKey) { ev.preventDefault(); openScan(dirOf(x.d), 'window'); }
+      if (ev.ctrlKey || ev.metaKey) { ev.preventDefault(); x.d.n.k ? fileElsewhere(x.d.path, 'tab') : openScan(dirOf(x.d), 'tab'); }
+      else if (ev.shiftKey) { ev.preventDefault(); x.d.n.k ? fileElsewhere(x.d.path, 'window') : openScan(dirOf(x.d), 'window'); }
       else x.go?.();
     });
     area.addEventListener('mousedown', (ev) => { if (ev.button === 1) ev.preventDefault(); });
     area.addEventListener('auxclick', (ev) => {
       if (ev.button !== 1) return;
       const x = targetOf(ev);
-      if (x?.d) { ev.preventDefault(); openScan(dirOf(x.d), 'tab'); }
+      if (x?.d) { ev.preventDefault(); x.d.n.k ? fileElsewhere(x.d.path, 'tab') : openScan(dirOf(x.d), 'tab'); }
     });
     area.addEventListener('contextmenu', (ev) => {
       const x = targetOf(ev);
@@ -938,12 +1020,12 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
     tr.tabIndex = 0;
     tr.title = 'Click to open this file. Right-click for more actions.';
     const fileD = { n: { k: 1 }, path };
-    const go = openFile(path);
+    const go = fileClick(path);
     tr.addEventListener('contextmenu', (ev) => { ev.preventDefault(); openMenu(fileD, go, ev, tr); });
     tr.addEventListener('click', (ev) => {
       if (ev.target.closest('button')) return;
-      if (ev.ctrlKey || ev.metaKey) openScan(parentOf(path), 'tab');
-      else if (ev.shiftKey) openScan(parentOf(path), 'window');
+      if (ev.ctrlKey || ev.metaKey) fileElsewhere(path, 'tab');
+      else if (ev.shiftKey) fileElsewhere(path, 'window');
       else go();
     });
     tbody.append(tr);
@@ -974,7 +1056,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
       : nf.format(D.denied_count) + ' folders could not be read (permissions) and are not counted.',
     'Shortcuts, junctions and symlinks were skipped so nothing is counted twice.' +
       (SEP === '\\' ? ' Some files inside C:\\Windows share storage (hard links), so that folder can look slightly bigger than it is.' : ''),
-    'Tip: right-click a block for more actions. ' + MOD + '+click opens a folder in a new tab, Shift+click in a new window (each is a fresh scan of that folder).',
+    'Tip: right-click a block for more actions. ' + MOD + '+click opens a folder in a new tab, Shift+click in a new window (each is a fresh scan of that folder). Click an image, video, audio or PDF file to preview it; ' + MOD + '+click or Shift+click previews it in a new tab or window.',
   ];
   if (D.stats.cloud_files) {
     notes.push(nf.format(D.stats.cloud_files) + ' online-only cloud files (' + fmt(D.stats.cloud_bytes) +

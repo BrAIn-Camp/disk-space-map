@@ -63,15 +63,9 @@ internal static class DiskSpaceServer
 
             ScanSession? Get(HttpRequest http) => int.TryParse(http.Query["scan"], out int id) && Sessions.TryGetValue(id, out ScanSession? s) ? s : null;
 
-            app.MapGet("/", async context =>
-            {
-                Assembly assembly = Assembly.GetExecutingAssembly();
-                string? resource = assembly.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith("wwwroot.index.html", StringComparison.Ordinal));
-                if (resource is null) { context.Response.StatusCode = 500; return; }
-                await using Stream stream = assembly.GetManifestResourceStream(resource)!;
-                context.Response.ContentType = "text/html; charset=utf-8";
-                await stream.CopyToAsync(context.Response.Body);
-            });
+            app.MapGet("/", context => ServeEmbedded(context, "wwwroot.index.html", "text/html; charset=utf-8"));
+            app.MapGet("/preview", context => ServeEmbedded(context, "wwwroot.preview.html", "text/html; charset=utf-8"));
+            app.MapGet("/viewer.js", context => ServeEmbedded(context, "wwwroot.viewer.js", "text/javascript; charset=utf-8"));
             app.MapGet("/api/ping", () => new { app = AppName, pid = Environment.ProcessId, scans = Sessions.Count });
             app.MapGet("/api/status", (HttpRequest http) => Get(http)?.Status.Snapshot() ?? new ScanStatus().Snapshot());
             app.MapGet("/api/data", (HttpRequest http) => Get(http)?.Data is { } data ? Results.Json(data, JsonOptions) : Results.NoContent());
@@ -116,6 +110,28 @@ internal static class DiskSpaceServer
                 sep = Path.DirectorySeparatorChar.ToString(),
                 fileManager = Launcher.FileManagerLabel,
                 shells = Launcher.AvailableShells(),
+                preview = MediaTypes.Kinds,
+            });
+            // Streams a previewable file (image, video, audio, PDF) to the browser, with range support so video can seek.
+            app.MapGet("/api/file", (HttpContext context) =>
+            {
+                ScanSession? session = Get(context.Request);
+                string? path = ResolveWithinScan(session, context.Request.Query["path"]);
+                if (path is null) return Results.BadRequest(new { error = "That path is not part of this scan." });
+                if (!MediaTypes.TryGet(Path.GetExtension(path), out MediaTypes.Entry? type)) return Results.BadRequest(new { error = "That file type can't be previewed." });
+                if (!File.Exists(path)) return Results.NotFound(new { error = "That file no longer exists." });
+                if (PassesThroughLink(RootOf(session!.Data!), path)) return Results.BadRequest(new { error = "Links are not followed." });
+
+                IHeaderDictionary headers = context.Response.Headers;
+                headers["X-Content-Type-Options"] = "nosniff";
+                headers["Cross-Origin-Resource-Policy"] = "same-origin";
+                headers["X-Frame-Options"] = "SAMEORIGIN";
+                headers["Cache-Control"] = "no-cache";
+                // If the file is ever opened directly, nothing in it (e.g. an SVG with a script) may run. PDFs are excluded because the
+                // browser's PDF viewer does not work inside a sandbox; it runs in its own isolated context.
+                if (type.Kind != "pdf") headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+                try { return Results.Stream(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete), type.ContentType, enableRangeProcessing: true); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return Results.BadRequest(new { error = "The file could not be read." }); }
             });
             app.MapPost("/api/reveal", (HttpRequest http, PathRequest request) =>
             {
@@ -164,11 +180,39 @@ internal static class DiskSpaceServer
         ? (Environment.GetEnvironmentVariable("SystemDrive") ?? "C:") + Path.DirectorySeparatorChar
         : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
+    private static async Task ServeEmbedded(HttpContext context, string nameSuffix, string contentType)
+    {
+        Assembly assembly = Assembly.GetExecutingAssembly();
+        string? resource = assembly.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith(nameSuffix, StringComparison.Ordinal));
+        if (resource is null) { context.Response.StatusCode = 500; return; }
+        await using Stream stream = assembly.GetManifestResourceStream(resource)!;
+        context.Response.ContentType = contentType;
+        context.Response.Headers.CacheControl = "no-cache";
+        await stream.CopyToAsync(context.Response.Body);
+    }
+
+    private static string RootOf(ScanData data) => data.Root.Length > 0 ? data.Root : data.Drive + Path.DirectorySeparatorChar; // older snapshots have no root
+
+    /// <summary>True if the file, or any folder between it and the scan root, is a symbolic link or junction.</summary>
+    private static bool PassesThroughLink(string root, string fullPath)
+    {
+        try
+        {
+            char[] separators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
+            string rootTrimmed = Path.GetFullPath(root).TrimEnd(separators);
+            if (new FileInfo(fullPath).LinkTarget is not null) return true;
+            for (string? dir = Path.GetDirectoryName(fullPath); !string.IsNullOrEmpty(dir) && dir.TrimEnd(separators).Length > rootTrimmed.Length; dir = Path.GetDirectoryName(dir))
+                if (new DirectoryInfo(dir).LinkTarget is not null) return true;
+            return false;
+        }
+        catch (Exception) { return true; } // can't tell, so don't serve it
+    }
+
     /// <summary>Returns the full path if it lies inside the folder this scan covered, otherwise null.</summary>
     private static string? ResolveWithinScan(ScanSession? session, string? path)
     {
         if (session?.Data is not { } data || string.IsNullOrWhiteSpace(path)) return null;
-        string root = data.Root.Length > 0 ? data.Root : data.Drive + Path.DirectorySeparatorChar; // older snapshots have no root
+        string root = RootOf(data);
         try
         {
             StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
