@@ -152,6 +152,52 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
 
 #missing { display: none; }
 
+#map, .list { user-select: none; -webkit-user-select: none; }
+
+/* toolbar */
+.toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; padding: 8px 12px; }
+.toolbar .grow { flex: 1; }
+.toolbar .hint { margin-right: 4px; }
+.pathbox { display: flex; align-items: center; gap: 4px; min-width: 0; flex: 0 1 560px; }
+.pathbox .static { font-weight: 650; font-size: 15px; padding: 4px 8px; border-radius: 6px; cursor: text; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.pathbox .static:hover, .pathbox .static:focus-visible { background: var(--grid); outline: none; }
+.pathbox input { font: inherit; padding: 5px 8px; flex: 1; min-width: 0; background: var(--page); color: var(--ink); border: 1px solid var(--axis); border-radius: 6px; }
+.pathbox input:focus { outline: 2px solid var(--seq); outline-offset: -1px; }
+.pathbox:not(.editing) input, .pathbox:not(.editing) #path-go, .pathbox.editing .static, .pathbox.editing #path-edit { display: none; }
+.icon { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; color: var(--ink-2); background: none; border: 1px solid transparent; border-radius: 6px; cursor: pointer; flex: none; }
+.icon:hover:not(:disabled), .icon[aria-expanded="true"] { background: var(--grid); color: var(--ink); }
+.icon:disabled { opacity: .35; cursor: default; }
+.icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+#cancel-button { display: none; }
+.popwrap { position: relative; }
+.pop { display: none; position: absolute; right: 0; top: calc(100% + 6px); z-index: 15; width: 300px; padding: 12px; background: var(--surface); border: 1px solid var(--axis); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.2); }
+.pop.show { display: block; }
+.pop h2 { margin-bottom: 8px; }
+.pop label { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; }
+.pop input, .pop select { font: inherit; padding: 5px; background: var(--page); color: var(--ink); border: 1px solid var(--axis); border-radius: 6px; }
+.pop input[type=number] { width: 90px; }
+.pop select { width: 100%; }
+.pop .hint { margin: 6px 0 0; }
+.poprow { display: flex; justify-content: flex-end; margin-top: 8px; }
+.ctx {
+  position: fixed; z-index: 20; min-width: 230px; padding: 4px; outline: none;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--axis); border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.22); font-size: 13px;
+}
+.ctx .it { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 6px 10px; border-radius: 5px; cursor: pointer; position: relative; white-space: nowrap; outline: none; }
+.ctx .it:hover:not(.dis), .ctx .it:focus, .ctx .it.open { background: var(--grid); }
+.ctx .it.dis { opacity: .4; cursor: default; }
+.ctx .it.def { font-weight: 650; }
+.ctx .it .hint { font-weight: 400; }
+.ctx .hr { height: 1px; background: var(--grid); margin: 4px 2px; }
+.ctx .subm { display: none; position: absolute; left: 100%; top: -5px; }
+.ctx .it.open > .subm { display: block; }
+#toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 30; display: none;
+  background: var(--tip-bg); color: var(--tip-ink); padding: 8px 14px; border-radius: 8px; font-size: 13px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.2); max-width: 80vw;
+}
+
 @media (max-width: 980px) {
   .explorer, .lower { grid-template-columns: minmax(0, 1fr); }
   .list { max-height: 420px; }
@@ -166,16 +212,44 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
 </head>
 <body>
 <div class="wrap">
+  <div class="toolbar card">
+    <div class="pathbox" id="pathbox">
+      <span class="static" id="path-static" tabindex="0" role="button" title="Click to change the folder"></span>
+      <input id="path-input" spellcheck="false" placeholder="Folder or drive to scan, e.g. C:\Users or D:\" aria-label="Folder or drive to scan">
+      <button class="icon" id="path-edit" title="Change folder" aria-label="Change folder"><svg viewBox="0 0 16 16"><path d="M11.5 1.8a1.6 1.6 0 0 1 2.3 2.3l-8 8L2.5 13.5l1.4-3.3 7.6-8.4z"/></svg></button>
+      <button class="icon" id="path-go" title="Scan this folder (Enter)" aria-label="Scan"><svg viewBox="0 0 16 16"><path d="M3 8h9M8.5 4l4 4-4 4"/></svg></button>
+    </div>
+    <button class="icon" id="rescan-button" title="Rescan this folder" aria-label="Rescan"><svg viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2v3h-3"/></svg></button>
+    <button class="btn" id="cancel-button" title="Stop the running scan">Cancel</button>
+    <span class="grow"></span>
+    <span class="hint" id="action-message"></span>
+    <div class="popwrap">
+      <button class="icon" id="opt-btn" title="Scan options" aria-label="Scan options" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg></button>
+      <div class="pop" id="opt-pop" role="dialog" aria-label="Scan options">
+        <h2>Scan options</h2>
+        <label>Workers <input id="opt-workers" type="number" min="1" max="16" value="4"></label>
+        <label>Min size (MB) <input id="opt-min" type="number" min="0" step="any" placeholder="auto"></label>
+        <p class="hint">Applies to the next scan. Min size is the smallest item drawn on the map; leave it blank for automatic (25 MB, lowered if nothing shows).</p>
+      </div>
+    </div>
+    <div class="popwrap">
+      <button class="icon" id="save-btn" title="Save this scan as a snapshot" aria-label="Save snapshot"><svg viewBox="0 0 16 16"><path d="M2.5 2.5h9l2 2v9h-11zM5 2.5v3.5h5V2.5M5 13.5V9h6v4.5"/></svg></button>
+    </div>
+    <div class="popwrap">
+      <button class="icon" id="load-btn" title="Open a saved snapshot" aria-label="Open snapshot" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 16 16"><path d="M1.5 4.5v8.5h11l2-6H4.5l-2 6M1.5 4.5h4l1.5 1.5h5.5V7"/></svg></button>
+      <div class="pop" id="load-pop" role="dialog" aria-label="Saved snapshots">
+        <h2>Saved snapshots</h2>
+        <select id="snapshot-list" size="6" aria-label="Saved snapshots"></select>
+        <div class="poprow"><button class="btn" id="load-button">Open</button></div>
+        <p class="hint" id="snap-empty"></p>
+      </div>
+    </div>
+  </div>
+
   <div id="missing" class="card">
-    <h1>Scanning disk</h1>
+    <h1>Disk Space Map</h1>
     <p class="sub" id="scan-message">Starting scan…</p>
     <p class="sub" id="scan-progress"></p>
-    <label>Folder or drive <input id="scan-path" value="C:\\" style="font:inherit;padding:5px;width:220px"></label>
-    <label>Workers <input id="scan-workers" type="number" min="1" max="16" value="4" style="font:inherit;padding:5px;width:64px"></label>
-    <button class="btn" id="scan-button">Scan / rescan</button>
-    <button class="btn" id="cancel-button">Cancel</button>
-    <select id="snapshot-list" style="font:inherit;padding:5px"></select>
-    <button class="btn" id="load-button">Open snapshot</button>
   </div>
 
   <div id="app">
@@ -185,15 +259,6 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
         <p class="sub" id="subtitle"></p>
       </div>
       <div id="status"></div>
-    </div>
-    <div class="card bar-row">
-      <label>Folder or drive <input id="rescan-path" value="C:\\" style="font:inherit;padding:5px;width:220px"></label>
-      <label>Workers <input id="rescan-workers" type="number" min="1" max="16" value="4" style="font:inherit;padding:5px;width:64px"></label>
-      <button class="btn" id="rescan-button">Scan / rescan</button>
-      <button class="btn" id="save-current-button">Save snapshot</button>
-      <select id="saved-scans" style="font:inherit;padding:5px"></select>
-      <button class="btn" id="open-saved-button">Open snapshot</button>
-      <span class="hint" id="action-message"></span>
     </div>
 
     <div class="card">
@@ -245,32 +310,129 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
 <script>
 (async function () {
   const $ = (s) => document.querySelector(s);
-  const response = await fetch('/api/data');
+  const SID = new URLSearchParams(location.search).get('scan');
+  const q = SID ? '?scan=' + encodeURIComponent(SID) : '';
+  const response = await fetch('/api/data' + q);
   const D = response.ok && response.status !== 204 ? await response.json() : null;
+  const setMsg = (t) => { $('#action-message').textContent = t; };
+  const jsonPost = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+  /* ---------- toolbar: options (remembered between pages) ---------- */
+  const OPT_KEY = 'dsm.options';
+  try {
+    const o = JSON.parse(localStorage.getItem(OPT_KEY) || '{}');
+    if (o.workers) $('#opt-workers').value = o.workers;
+    if (o.min != null) $('#opt-min').value = o.min;
+  } catch (e) { /* storage unavailable: defaults are fine */ }
+  $('#opt-workers').onchange = $('#opt-min').onchange = () => {
+    try { localStorage.setItem(OPT_KEY, JSON.stringify({ workers: $('#opt-workers').value, min: $('#opt-min').value })); } catch (e) { /* ignore */ }
+  };
+  function scanBody(path) {
+    const t = $('#opt-min').value.trim();
+    return { path, workers: Number($('#opt-workers').value) || 4, minSizeMb: t === '' || isNaN(Number(t)) ? null : Number(t) };
+  }
+  // Starts a scan and moves this tab to it. Returns false (with a message) if it could not start.
+  async function startScan(path) {
+    path = path.trim();
+    if (!path) { setMsg('Type a folder or drive to scan.'); return false; }
+    setMsg('Starting scan\u2026');
+    try {
+      const r = await jsonPost('/api/scan', scanBody(path));
+      const j = await r.json();
+      if (!r.ok) { setMsg(j.error || 'Could not start scan.'); return false; }
+      location.href = '/?scan=' + j.id;
+      return true;
+    } catch (e) { setMsg('Could not reach the server.'); return false; }
+  }
+
+  /* ---------- toolbar: folder box (static text + pencil <-> editable) ---------- */
+  const box = $('#pathbox'), input = $('#path-input'), stat = $('#path-static');
+  let currentRoot = '';
+  function showStatic(root) {
+    currentRoot = root;
+    stat.textContent = root;
+    stat.title = root + ' \u2014 click to change';
+    box.classList.remove('editing');
+  }
+  function edit() { input.value = currentRoot; box.classList.add('editing'); input.focus(); input.select(); }
+  async function commit() { if (await startScan(input.value)) showStatic(input.value.trim()); }
+  stat.onclick = edit;
+  stat.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); edit(); } };
+  $('#path-edit').onclick = edit;
+  $('#path-go').onclick = commit;
+  input.onkeydown = (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+    else if (ev.key === 'Escape') { ev.stopPropagation(); if (currentRoot) box.classList.remove('editing'); }
+  };
+
+  /* ---------- toolbar: flyout panels ---------- */
+  const pops = [['#opt-btn', '#opt-pop'], ['#load-btn', '#load-pop']];
+  function closePops() { for (const [b, p] of pops) { $(p).classList.remove('show'); $(b).setAttribute('aria-expanded', 'false'); } }
+  function togglePop(b, p) {
+    const open = !$(p).classList.contains('show');
+    closePops();
+    if (open) { $(p).classList.add('show'); $(b).setAttribute('aria-expanded', 'true'); }
+    return open;
+  }
+  document.addEventListener('pointerdown', (ev) => { if (!ev.target.closest('.popwrap')) closePops(); });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && document.querySelector('.pop.show')) { ev.preventDefault(); ev.stopImmediatePropagation(); closePops(); }
+  }, true);
+  $('#opt-btn').onclick = () => { if (togglePop('#opt-btn', '#opt-pop')) $('#opt-workers').focus(); };
+
+  async function refreshSnapshots() {
+    try {
+      const names = await (await fetch('/api/snapshots')).json();
+      $('#snapshot-list').replaceChildren(...names.map((n) => new Option(n, n)));
+      $('#snap-empty').textContent = names.length ? '' : 'No saved snapshots yet.';
+      $('#load-button').disabled = !names.length;
+      if (names.length) $('#snapshot-list').selectedIndex = 0;
+    } catch (e) { $('#snap-empty').textContent = 'Could not list snapshots.'; }
+  }
+  async function openSnapshot() {
+    const name = $('#snapshot-list').value;
+    if (!name) return;
+    const r = await jsonPost('/api/load', { name });
+    if (r.ok) location.href = '/?scan=' + (await r.json()).id; else setMsg('Could not open snapshot.');
+  }
+  $('#load-btn').onclick = async () => {
+    if (!togglePop('#load-btn', '#load-pop')) return;
+    await refreshSnapshots();
+    $('#snapshot-list').focus(); // so arrow keys and Enter work straight away
+  };
+  $('#load-button').onclick = openSnapshot;
+  $('#snapshot-list').ondblclick = openSnapshot;
+  $('#snapshot-list').onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); openSnapshot(); } };
+  $('#cancel-button').onclick = () => fetch('/api/cancel' + q, { method: 'POST' });
+
+  /* ---------- start page (nothing scanned in this tab yet) ---------- */
   if (!D) {
     $('#app').style.display = 'none';
     $('#missing').style.display = 'block';
+    $('#save-btn').disabled = true;
+    $('#rescan-button').disabled = true;
+    const fmtProgress = (n) => n >= 1024 ** 3 ? (n / 1024 ** 3).toFixed(1) + ' GB' : n >= 1024 ** 2 ? Math.round(n / 1024 ** 2) + ' MB' : n.toLocaleString() + ' bytes';
     async function refreshStatus() {
-      const s = await (await fetch('/api/status')).json();
-      $('#scan-message').textContent = s.state === 'error' ? 'Scan failed: ' + s.error : s.state === 'scanning' ? 'Scanning… ' + s.currentPath : s.state === 'cancelled' ? 'Scan cancelled.' : s.state === 'complete' ? 'Scan complete. Loading map…' : 'Ready to scan.';
-      $('#scan-progress').textContent = s.state === 'scanning' ? s.directories.toLocaleString() + ' folders · ' + s.files.toLocaleString() + ' files · ' + fmtProgress(s.bytes) + ' scanned' : '';
+      const s = await (await fetch('/api/status' + q)).json();
+      $('#scan-message').textContent = s.state === 'error' ? 'Scan failed: ' + s.error : s.state === 'scanning' ? 'Scanning\u2026 ' + s.currentPath : s.state === 'cancelled' ? 'Scan cancelled.' : s.state === 'complete' ? 'Scan complete. Loading map\u2026' : 'Type a folder or drive to scan.';
+      $('#scan-progress').textContent = s.state === 'scanning' ? s.directories.toLocaleString() + ' folders \u00b7 ' + s.files.toLocaleString() + ' files \u00b7 ' + fmtProgress(s.bytes) + ' scanned' : '';
+      $('#cancel-button').style.display = s.state === 'scanning' ? 'inline-block' : '';
       if (s.state === 'complete') location.reload();
     }
-    function fmtProgress(n) { return n >= 1024 ** 3 ? (n / 1024 ** 3).toFixed(1) + ' GB' : n >= 1024 ** 2 ? Math.round(n / 1024 ** 2) + ' MB' : n.toLocaleString() + ' bytes'; }
-    $('#scan-button').onclick = async () => { await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: $('#scan-path').value.trim(), workers: Number($('#scan-workers').value) || 4 }) }); refreshStatus(); };
-    $('#cancel-button').onclick = () => fetch('/api/cancel', { method: 'POST' });
-    $('#load-button').onclick = async () => { const name = $('#snapshot-list').value; if (!name) return; const r = await fetch('/api/load', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }); if (r.ok) location.reload(); };
-    const names = await (await fetch('/api/snapshots')).json();
-    $('#snapshot-list').replaceChildren(...names.map(name => new Option(name, name)));
-    const initial = await (await fetch('/api/status')).json();
-    if (initial.state === 'idle' || initial.state === 'cancelled' || initial.state === 'error') $('#scan-button').click();
+    const initial = await (await fetch('/api/status' + q)).json();
+    if (initial.root) showStatic(initial.root);
+    else { box.classList.add('editing'); input.focus(); }
+    refreshStatus();
     setInterval(refreshStatus, 1000);
     return;
   }
   $('#missing').style.display = 'none';
 
+  const SEP = D.sep || '\\'; // path separator of the machine that was scanned
+  let menu = null; // the open context menu, if any
   const SLOTS = 8;
   const HEADER = 20;
+  const MIN = D.min_size || 25 * 1024 * 1024;
   const nf = new Intl.NumberFormat();
 
   function fmt(b) {
@@ -292,35 +454,23 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
     if (text != null) e.textContent = text;
     return e;
   }
-  function joinPath(base, name) { return base.endsWith('\\') ? base + name : base + '\\' + name; }
+  function joinPath(base, name) { return base.endsWith(SEP) ? base + name : base + SEP + name; }
 
-  async function refreshSavedScans() {
-    const names = await (await fetch('/api/snapshots')).json();
-    $('#saved-scans').replaceChildren(...names.map(name => new Option(name, name)));
-  }
-  $('#rescan-path').value = D.drive + '\\';
-  $('#rescan-button').onclick = async () => {
-    const result = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: $('#rescan-path').value.trim(), workers: Number($('#rescan-workers').value) || 4 }) });
-    if (result.ok) location.reload();
-    else $('#action-message').textContent = 'A scan may already be running.';
+  const ROOT = D.root || (D.drive.endsWith(SEP) ? D.drive : D.drive + SEP);
+  showStatic(ROOT);
+  $('#rescan-button').onclick = () => startScan(ROOT);
+  $('#save-btn').onclick = async () => {
+    try {
+      const r = await jsonPost('/api/save' + q, {});
+      const j = await r.json();
+      setMsg(r.ok ? 'Saved ' + j.saved : (j.error || 'Save failed.'));
+      if (r.ok) setTimeout(() => { if ($('#action-message').textContent.startsWith('Saved')) setMsg(''); }, 4000);
+    } catch (e) { setMsg('Could not reach the server.'); }
   };
-  $('#save-current-button').onclick = async () => {
-    const result = await fetch('/api/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    const data = await result.json();
-    $('#action-message').textContent = result.ok ? 'Saved ' + data.saved + ' in ' + data.directory : (data.error || 'Save failed.');
-    await refreshSavedScans();
-  };
-  $('#open-saved-button').onclick = async () => {
-    const name = $('#saved-scans').value;
-    if (!name) return;
-    const result = await fetch('/api/load', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
-    if (result.ok) location.reload(); else $('#action-message').textContent = 'Could not open snapshot.';
-  };
-  await refreshSavedScans();
 
   /* ---------- headline ---------- */
   const low = D.free / D.total < 0.1;
-  $('#title').textContent = D.drive + ' drive';
+  document.title = 'Disk Space Map - ' + ROOT;
   $('#subtitle').textContent = 'Scanned ' + D.scanned_at + ' in ' + D.seconds + 's';
   const stats = [
     [fmt(D.free), 'free (' + pct(D.free, D.total) + ')'],
@@ -349,10 +499,11 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
   const stack = [D.tree];
   const tip = $('#tip');
   const info = new WeakMap();
+  const goes = new WeakMap(); // tile / row -> what a plain click does
   const isSpecial = (n) => n.o || n.u;
 
   function curPath() {
-    return stack.length === 1 ? D.drive + '\\' : stack.map((n) => n.n).join('\\');
+    return stack.length === 1 ? ROOT : joinPath(ROOT, stack.slice(1).map((n) => n.n).join(SEP));
   }
   function slotMap(node) {
     const m = new Map();
@@ -378,7 +529,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
   function describe(n, path, parentSize, name) {
     let kind = n.k ? 'File' : 'Folder';
     let extra = '';
-    if (n.o) { kind = 'Many smaller items'; extra = 'Files and folders under 25 MB each, added together.'; }
+    if (n.o) { kind = 'Many smaller items'; extra = 'Files and folders under ' + fmt(MIN) + ' each, added together.'; }
     if (n.u) { kind = 'Protected space'; extra = 'Windows counts this as used, but reading it needs admin rights: System Restore points, other user accounts and protected system data.'; }
     return { n, path, kind, extra, parentSize, name: name || n.n };
   }
@@ -391,8 +542,8 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
     const nav = $('#crumbs');
     nav.replaceChildren();
     stack.forEach((n, i) => {
-      if (i) nav.append(el('span', 'sep', '\\'));
-      const b = el('button', null, i === 0 ? D.drive + '\\' : n.n);
+      if (i) nav.append(el('span', 'sep', SEP));
+      const b = el('button', null, i === 0 ? ROOT : n.n);
       if (i === stack.length - 1) b.setAttribute('aria-current', 'page');
       else b.onclick = () => { stack.length = i + 1; render(); };
       nav.append(b);
@@ -419,7 +570,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
     const map = $('#map');
     map.replaceChildren();
     if (!node.c) {
-      map.append(el('div', 'empty', 'Everything in here is smaller than 25 MB, so there is nothing bigger to show.'));
+      map.append(el('div', 'empty', 'Everything in here is smaller than ' + fmt(MIN) + ', so there is nothing bigger to show.'));
       return;
     }
     const W = map.clientWidth, H = map.clientHeight;
@@ -446,7 +597,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
     for (const g of root.children || []) {
       const { src, chain, end } = g.data;
       const col = colorOf(src, slots);
-      const name = chain.map((n) => n.n).join('\\');
+      const name = chain.map((n) => n.n).join(SEP);
       const gpath = joinPath(base, name);
       const w = g.x1 - g.x0, h = g.y1 - g.y0;
       if (g.children) {
@@ -458,7 +609,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
           if (w >= 110) hd.append(el('span', null, fmt(end.s)));
           box.append(hd);
         }
-        box.onclick = () => drill(chain);
+        goes.set(box, () => drill(chain));
         info.set(box, describe(end, gpath, node.s, name));
         map.append(box);
         for (const t of g.children) {
@@ -468,7 +619,8 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
           if (tsrc.o) tile.classList.add('other');
           place(tile, t);
           label(tile, tsrc, t.x1 - t.x0, t.y1 - t.y0);
-          tile.onclick = (ev) => { ev.stopPropagation(); drill(tsrc.c ? [...chain, tsrc] : chain); };
+          if (tsrc.c) goes.set(tile, () => drill([...chain, tsrc]));
+          else if (!tsrc.o && !tsrc.k) goes.set(tile, () => drill(chain));
           info.set(tile, describe(tsrc, tsrc.o ? gpath : joinPath(gpath, tsrc.n), end.s));
           map.append(tile);
         }
@@ -506,11 +658,11 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
       track.append(fill);
       row.append(el('span', 'sw'), el('span', 'nm', c.n), el('span', 'sz', fmt(c.s) + ' · ' + pct(c.s, node.s)), track);
       row.title = c.k ? 'File' : c.c ? 'Open ' + c.n : c.n;
-      if (c.c) row.onclick = () => drill(chainOf(c));
+      if (c.c) goes.set(row, () => drill(chainOf(c)));
       info.set(row, describe(c, isSpecial(c) ? curPath() : joinPath(curPath(), c.n), node.s));
       list.append(row);
     }
-    if (!kids.length) list.append(el('div', 'muted', 'No items of 25 MB or more in here.'));
+    if (!kids.length) list.append(el('div', 'muted', 'No items of ' + fmt(MIN) + ' or more in here.'));
   }
 
   function render() {
@@ -543,14 +695,14 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
   for (const area of [$('#map'), $('#list')]) {
     area.addEventListener('pointermove', (ev) => {
       const t = ev.target.closest('.t, .g, .row');
-      if (t) showTip(t, ev.clientX, ev.clientY); else tip.style.display = 'none';
+      if (t && !menu) showTip(t, ev.clientX, ev.clientY); else tip.style.display = 'none';
     });
     area.addEventListener('pointerleave', () => { tip.style.display = 'none'; });
   }
 
   $('#up').onclick = () => { if (stack.length > 1) { stack.pop(); render(); } };
   document.addEventListener('keydown', (ev) => {
-    if ((ev.key === 'Backspace' || ev.key === 'Escape') && stack.length > 1) {
+    if ((ev.key === 'Backspace' || ev.key === 'Escape') && stack.length > 1 && !ev.target.closest?.('input, select, textarea')) {
       ev.preventDefault();
       stack.pop();
       render();
@@ -559,11 +711,186 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
   let raf = 0;
   new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(renderMap); }).observe($('#map'));
 
+  /* ---------- context menu, modifier clicks ---------- */
+  const caps = await fetch('/api/capabilities').then((r) => r.json()).catch(() => ({ os: '', fileManager: 'Open in file manager', shells: [] }));
+  const MOD = caps.os === 'mac' ? '\u2318' : 'Ctrl';
+
+  function toast(msg) {
+    let t = $('#toast');
+    if (!t) { t = el('div'); t.id = 'toast'; document.body.append(t); }
+    t.textContent = msg;
+    t.style.display = 'block';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.style.display = 'none'; }, 2500);
+  }
+  async function post(url, body) {
+    try {
+      const r = await fetch(url + q, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) toast((await r.json().catch(() => ({}))).error || 'That did not work.');
+    } catch (e) { toast('Could not reach the server.'); }
+  }
+  async function copyText(text, what) {
+    try { await navigator.clipboard.writeText(text); toast('Copied ' + what); }
+    catch (e) { toast('Copy failed'); }
+  }
+  function relPath(p) {
+    if (p === ROOT) return '.';
+    const base = ROOT.endsWith(SEP) ? ROOT : ROOT + SEP;
+    return p.startsWith(base) ? p.slice(base.length) : p;
+  }
+  // The folder an item lives in (or is): files use their parent, everything else its own path.
+  const dirOf = (d) => d.n.k ? parentOf(d.path) : d.path;
+  function parentOf(p) {
+    const i = p.lastIndexOf(SEP);
+    return i <= 0 || p[i - 1] === ':' ? p.slice(0, i + 1) : p.slice(0, i);
+  }
+
+  // Starts a fresh scan of the folder and shows it in a new tab or window.
+  async function openScan(path, mode) {
+    // Open the tab now (inside the click) so the pop-up blocker allows it, then point it at the scan.
+    const win = mode === 'window' ? window.open('about:blank', '_blank', 'popup,width=1280,height=860') : window.open('about:blank', '_blank');
+    if (!win) { toast('The browser blocked the new ' + mode + '. Allow pop-ups for this page.'); return; }
+    win.document.title = 'Scanning\u2026';
+    win.document.body.textContent = 'Scanning ' + path + '\u2026';
+    try {
+      const r = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scanBody(path)) });
+      const j = await r.json();
+      if (r.ok) win.location.href = '/?scan=' + j.id;
+      else { win.close(); toast(j.error || 'Could not start scan.'); }
+    } catch (e) { win.close(); toast('Could not start scan.'); }
+  }
+
+  function closeMenu() { if (menu) { menu.remove(); menu = null; } }
+  function buildMenu(items) {
+    const m = el('div', 'ctx');
+    m.setAttribute('role', 'menu');
+    for (const it of items) {
+      if (it.sep) { m.append(el('div', 'hr')); continue; }
+      const row = el('div', 'it' + (it.bold ? ' def' : '') + (it.disabled ? ' dis' : ''));
+      row.setAttribute('role', 'menuitem');
+      row.tabIndex = -1;
+      if (it.disabled) row.setAttribute('aria-disabled', 'true');
+      row.append(el('span', null, it.label));
+      if (it.hint) row.append(el('span', 'hint', it.hint));
+      if (it.sub) {
+        row.append(el('span', 'hint', '\u25B8'));
+        const subMenu = buildMenu(it.sub);
+        subMenu.classList.add('subm');
+        row.append(subMenu);
+      }
+      row.onmouseenter = () => {
+        for (const s of row.parentElement.querySelectorAll(':scope > .it.open')) if (s !== row) s.classList.remove('open');
+        if (!it.disabled) { row.focus({ preventScroll: true }); if (it.sub) openSub(row); }
+      };
+      row.onclick = (ev) => {
+        ev.stopPropagation();
+        if (it.disabled) return;
+        if (it.sub) { openSub(row); return; }
+        closeMenu();
+        it.run?.();
+      };
+      m.append(row);
+    }
+    return m;
+  }
+  function openSub(row) {
+    row.classList.add('open');
+    const sub = row.querySelector(':scope > .subm');
+    sub.style.left = ''; sub.style.right = '';
+    const r = sub.getBoundingClientRect();
+    if (r.right > innerWidth - 8) { sub.style.left = 'auto'; sub.style.right = '100%'; }
+    if (r.bottom > innerHeight - 8) sub.style.top = Math.min(-5, innerHeight - 8 - r.bottom) + 'px';
+  }
+  function openMenu(d, go, ev, target) {
+    closeMenu();
+    tip.style.display = 'none';
+    const special = !!(d.n.o || d.n.u);
+    const isFile = !!d.n.k;
+    const path = d.path;
+    const dir = dirOf(d); // for a file, its folder; for a folder or a grouped block, the folder itself
+    const where = isFile || special ? 'containing folder ' : '';
+    const shells = caps.shells || [];
+    const launch = (s) => () => post('/api/shell', { path: dir, shell: s.id });
+    const items = [];
+    if (!d.noOpen) items.push({ label: 'Open', bold: true, disabled: !go, run: go });
+    items.push(
+      { label: 'Open ' + where + 'in new tab', hint: MOD + '+click', run: () => openScan(dir, 'tab') },
+      { label: 'Open ' + where + 'in new window', hint: 'Shift+click', run: () => openScan(dir, 'window') },
+      { sep: true },
+      { label: caps.fileManager, run: () => post('/api/reveal', { path }) },
+      shells.length > 1
+        ? { label: 'Launch shell here', sub: shells.map((s) => ({ label: s.name, run: launch(s) })) }
+        : { label: shells.length ? 'Open ' + shells[0].name + ' here' : 'Launch shell here', disabled: !shells.length, run: shells.length ? launch(shells[0]) : null },
+      { sep: true },
+      { label: isFile ? 'Copy file path' : 'Copy path', run: () => copyText(path, 'path') },
+    );
+    if (isFile) items.push({ label: 'Copy folder path', run: () => copyText(dir, 'folder path') });
+    items.push({ label: 'Copy relative path', run: () => copyText(relPath(path), 'relative path') });
+    menu = buildMenu(items);
+    menu.tabIndex = -1;
+    document.body.append(menu);
+    let x = ev.clientX, y = ev.clientY;
+    if (!x && !y) { const r = target.getBoundingClientRect(); x = r.left + 8; y = r.bottom - 4; } // opened from the keyboard
+    const r = menu.getBoundingClientRect();
+    menu.style.left = Math.max(8, Math.min(x, innerWidth - r.width - 8)) + 'px';
+    menu.style.top = Math.max(8, Math.min(y, innerHeight - r.height - 8)) + 'px';
+    menu.focus({ preventScroll: true });
+  }
+  document.addEventListener('pointerdown', (ev) => { if (menu && !menu.contains(ev.target)) closeMenu(); }, true);
+  window.addEventListener('blur', closeMenu);
+  window.addEventListener('resize', closeMenu);
+  window.addEventListener('scroll', closeMenu, true);
+  document.addEventListener('keydown', (ev) => {
+    if (!menu) return;
+    const active = document.activeElement;
+    const cur = active?.closest?.('.ctx') || menu;
+    const items = [...cur.children].filter((c) => c.classList.contains('it') && !c.classList.contains('dis'));
+    const at = items.indexOf(active);
+    const leaveSub = () => { const row = cur.parentElement; row.classList.remove('open'); row.focus(); };
+    let handled = true;
+    if (ev.key === 'ArrowDown') items[(at + 1) % items.length]?.focus();
+    else if (ev.key === 'ArrowUp') items[at <= 0 ? items.length - 1 : at - 1]?.focus();
+    else if (ev.key === 'Home') items[0]?.focus();
+    else if (ev.key === 'End') items[items.length - 1]?.focus();
+    else if (ev.key === 'ArrowRight') { if (active?.querySelector?.(':scope > .subm')) { openSub(active); active.querySelector(':scope > .subm .it:not(.dis)')?.focus(); } }
+    else if (ev.key === 'ArrowLeft') { if (cur !== menu) leaveSub(); }
+    else if (ev.key === 'Enter' || ev.key === ' ') { if (at >= 0) active.click(); }
+    else if (ev.key === 'Escape') { if (cur !== menu) leaveSub(); else closeMenu(); }
+    else handled = false;
+    if (handled) { ev.preventDefault(); ev.stopImmediatePropagation(); }
+  }, true);
+
+  function targetOf(ev) {
+    const t = ev.target.closest('.t, .g, .row');
+    return t ? { t, d: info.get(t), go: goes.get(t) } : null;
+  }
+  for (const area of [$('#map'), $('#list')]) {
+    area.addEventListener('click', (ev) => {
+      const x = targetOf(ev);
+      if (!x?.d) return;
+      if (ev.ctrlKey || ev.metaKey) { ev.preventDefault(); openScan(dirOf(x.d), 'tab'); }
+      else if (ev.shiftKey) { ev.preventDefault(); openScan(dirOf(x.d), 'window'); }
+      else x.go?.();
+    });
+    area.addEventListener('mousedown', (ev) => { if (ev.button === 1) ev.preventDefault(); });
+    area.addEventListener('auxclick', (ev) => {
+      if (ev.button !== 1) return;
+      const x = targetOf(ev);
+      if (x?.d) { ev.preventDefault(); openScan(dirOf(x.d), 'tab'); }
+    });
+    area.addEventListener('contextmenu', (ev) => {
+      const x = targetOf(ev);
+      if (!x?.d) return;
+      ev.preventDefault();
+      openMenu(x.d, x.go, ev, x.t);
+    });
+  }
+
   /* ---------- largest files ---------- */
   const tbody = $('#files');
   for (const [path, size] of D.biggest.slice(0, 100)) {
     const tr = el('tr');
-    const i = path.lastIndexOf('\\');
+    const i = path.lastIndexOf(SEP);
     const cell = el('td');
     cell.append(el('div', 'fname', path.slice(i + 1)), el('div', 'fdir', path.slice(0, i + 1)));
     const copy = el('button', 'copy', 'Copy path');
@@ -575,6 +902,15 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
     const c3 = el('td', 'r');
     c3.append(copy);
     tr.append(cell, el('td', 'r num', fmt(size)), c3);
+    tr.tabIndex = 0;
+    tr.title = 'Right-click for actions on this file\'s folder';
+    const fileD = { n: { k: 1 }, path, noOpen: true };
+    tr.addEventListener('contextmenu', (ev) => { ev.preventDefault(); openMenu(fileD, null, ev, tr); });
+    tr.addEventListener('click', (ev) => {
+      if (ev.target.closest('button')) return;
+      if (ev.ctrlKey || ev.metaKey) openScan(parentOf(path), 'tab');
+      else if (ev.shiftKey) openScan(parentOf(path), 'window');
+    });
     tbody.append(tr);
   }
 
@@ -597,16 +933,19 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
 
   /* ---------- notes ---------- */
   const notes = [
-    'Folders and files under 25 MB are grouped as "(smaller items)" to keep the map readable.',
-    'Hatched block: space Windows reports as used that this scan could not read without admin rights (' +
-      nf.format(D.denied_count) + ' folders were not readable). This is usually System Restore points and protected system data.',
-    'Shortcuts, junctions and symlinks were skipped so nothing is counted twice. Some files inside C:\\Windows share storage (hard links), so that folder can look slightly bigger than it is.',
+    'Folders and files under ' + fmt(MIN) + ' are grouped as "(smaller items)" to keep the map readable.',
+    SEP === '\\'
+      ? 'Hatched block: space Windows reports as used that this scan could not read without admin rights (' + nf.format(D.denied_count) + ' folders were not readable). This is usually System Restore points and protected system data.'
+      : nf.format(D.denied_count) + ' folders could not be read (permissions) and are not counted.',
+    'Shortcuts, junctions and symlinks were skipped so nothing is counted twice.' +
+      (SEP === '\\' ? ' Some files inside C:\\Windows share storage (hard links), so that folder can look slightly bigger than it is.' : ''),
+    'Tip: right-click a block for more actions. ' + MOD + '+click opens a folder in a new tab, Shift+click in a new window (each is a fresh scan of that folder).',
   ];
   if (D.stats.cloud_files) {
     notes.push(nf.format(D.stats.cloud_files) + ' online-only cloud files (' + fmt(D.stats.cloud_bytes) +
       ', e.g. OneDrive "Files On-Demand") were left out because they are not stored on this disk.');
   }
-  notes.push('To refresh, run python scan_disk.py ' + D.drive + ' in this folder and reload the page.');
+  notes.push('Used / free / total are for the whole ' + D.drive + ' drive; the map shows only ' + ROOT + '. Use the box at the top to scan somewhere else.');
   for (const n of notes) $('#notes').append(el('li', null, n));
 
   render();

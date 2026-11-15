@@ -8,7 +8,8 @@ namespace DiskSpaceMap;
 
 internal sealed class DiskScanner
 {
-    private const long KeepBytes = 25L * 1024 * 1024;
+    public const long DefaultKeepBytes = 25L * 1024 * 1024;
+    private readonly long _keepBytes;
     private const int TopFileLimit = 300;
     private const uint FileAttributeDirectory = 0x10;
     private const uint FileAttributeReparsePoint = 0x400;
@@ -22,24 +23,27 @@ internal sealed class DiskScanner
     private readonly ScanStatus _status;
     private long _fileCount, _directoryCount, _cloudCount, _cloudBytes, _linksSkipped, _bytes;
 
-    public DiskScanner(ScanStatus status, int workerCount)
+    public DiskScanner(ScanStatus status, int workerCount, long keepBytes = DefaultKeepBytes)
     {
         _status = status;
+        _keepBytes = Math.Max(0, keepBytes);
         _workers = new SemaphoreSlim(Math.Clamp(workerCount, 1, 16));
     }
 
     public async Task<ScanData> ScanAsync(string rootPath, CancellationToken cancellationToken)
     {
-        string drive = Path.GetPathRoot(Path.GetFullPath(rootPath)) ?? throw new ArgumentException("Choose a valid drive or folder.");
+        rootPath = Path.GetFullPath(rootPath);
+        string pathRoot = Path.GetPathRoot(rootPath) ?? throw new ArgumentException("Choose a valid drive or folder.");
         DateTimeOffset started = DateTimeOffset.Now;
         DiskNode root = await ScanDirectoryAsync(rootPath, Path.GetFileName(Path.TrimEndingDirectorySeparator(rootPath)) is { Length: > 0 } rootName ? rootName : Path.GetPathRoot(rootPath) ?? rootPath, cancellationToken);
-        DriveInfo? driveInfo = DriveInfo.GetDrives().FirstOrDefault(d => string.Equals(Path.GetPathRoot(d.Name), drive, StringComparison.OrdinalIgnoreCase));
+        DriveInfo? driveInfo = FindDrive(rootPath);
+        string drive = driveInfo?.Name ?? pathRoot;
         long total = driveInfo?.TotalSize ?? root.Size;
         long free = driveInfo?.TotalFreeSpace ?? 0;
         long used = Math.Max(0, total - free);
-        bool scanningWholeVolume = string.Equals(Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), drive.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
+        bool scanningWholeVolume = OperatingSystem.IsWindows() && string.Equals(Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), drive.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
         long hidden = scanningWholeVolume ? used - root.Size : 0;
-        if (hidden > KeepBytes)
+        if (hidden > _keepBytes)
         {
             root.Children ??= [];
             root.Children.Add(new DiskNode("(unreadable without admin: system / restore points)", hidden, 0) { Unreadable = true });
@@ -49,7 +53,10 @@ internal sealed class DiskScanner
 
         return new ScanData
         {
-            Drive = drive.TrimEnd(Path.DirectorySeparatorChar),
+            Drive = drive.TrimEnd(Path.DirectorySeparatorChar) is { Length: > 0 } driveName ? driveName : drive,
+            Sep = Path.DirectorySeparatorChar.ToString(),
+            Root = rootPath,
+            MinSize = _keepBytes,
             ScannedAt = started.ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
             Seconds = (int)Math.Round((DateTimeOffset.Now - started).TotalSeconds),
             Total = total,
@@ -62,6 +69,22 @@ internal sealed class DiskScanner
             Biggest = _largest.OrderByDescending(x => x.Size).Take(TopFileLimit).Select(x => new[] { JsonSerializer.SerializeToElement(x.Path), JsonSerializer.SerializeToElement(x.Size) }).ToList(),
             Tree = root
         };
+    }
+
+    /// <summary>Finds the volume that holds the path: the drive whose mount point is the longest prefix of it.</summary>
+    private static DriveInfo? FindDrive(string fullPath)
+    {
+        StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        string path = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        try
+        {
+            return DriveInfo.GetDrives()
+                .Where(d => d.Name.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) is { } mount
+                    && (path.Equals(mount, comparison) || path.StartsWith(mount + Path.DirectorySeparatorChar, comparison)))
+                .OrderByDescending(d => d.Name.Length)
+                .FirstOrDefault(d => { try { return d.IsReady; } catch (IOException) { return false; } });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
 
     private async Task<DiskNode> ScanDirectoryAsync(string path, string name, CancellationToken token)
@@ -129,7 +152,7 @@ internal sealed class DiskScanner
                         foreach (var item in keep) _largest.Enqueue(item);
                     }
                 }
-                if (size >= KeepBytes) (node.Children ??= []).Add(new DiskNode(entry.Name, size, 1) { IsFile = true });
+                if (size >= _keepBytes) (node.Children ??= []).Add(new DiskNode(entry.Name, size, 1) { IsFile = true });
                 else { node.SmallBytes += size; node.SmallFiles++; }
             }
 
@@ -144,7 +167,7 @@ internal sealed class DiskScanner
             {
                 node.Size += child.Size;
                 node.Files += child.Files;
-                if (child.Size >= KeepBytes) (node.Children ??= []).Add(child);
+                if (child.Size >= _keepBytes) (node.Children ??= []).Add(child);
                 else { node.SmallBytes += child.Size; node.SmallFiles += child.Files; }
             }
             if (node.Children is { Count: > 0 })
@@ -186,21 +209,25 @@ internal sealed class ScanStatus
     private readonly object _gate = new();
     public string State { get; private set; } = "idle";
     public string CurrentPath { get; private set; } = "";
+    public string Root { get; private set; } = "";
     public long Directories { get; private set; }
     public long Files { get; private set; }
     public long Bytes { get; private set; }
     public string? Error { get; private set; }
-    public void Start() { lock (_gate) { State = "scanning"; Error = null; CurrentPath = ""; Directories = Files = Bytes = 0; } }
+    public void Start(string root) { lock (_gate) { State = "scanning"; Root = root; Error = null; CurrentPath = ""; Directories = Files = Bytes = 0; } }
     public void SetCurrent(string path, long dirs, long files, long bytes) { lock (_gate) { CurrentPath = path; Directories = dirs; Files = files; Bytes = bytes; } }
     public void Complete() { lock (_gate) State = "complete"; }
     public void Fail(string error) { lock (_gate) { State = "error"; Error = error; } }
     public void Cancel() { lock (_gate) State = "cancelled"; }
-    public object Snapshot() { lock (_gate) return new { state = State, currentPath = CurrentPath, directories = Directories, files = Files, bytes = Bytes, error = Error }; }
+    public object Snapshot() { lock (_gate) return new { state = State, root = Root, currentPath = CurrentPath, directories = Directories, files = Files, bytes = Bytes, error = Error }; }
 }
 
 internal sealed class ScanData
 {
     [JsonPropertyName("drive")] public string Drive { get; set; } = "";
+    [JsonPropertyName("sep")] public string Sep { get; set; } = "\\"; // snapshots from before this field existed were all Windows
+    [JsonPropertyName("root")] public string Root { get; set; } = "";
+    [JsonPropertyName("min_size")] public long MinSize { get; set; } = DiskScanner.DefaultKeepBytes;
     [JsonPropertyName("scanned_at")] public string ScannedAt { get; set; } = "";
     [JsonPropertyName("seconds")] public int Seconds { get; set; }
     [JsonPropertyName("total")] public long Total { get; set; }
