@@ -190,11 +190,15 @@ internal sealed class DiskScanner
         catch { return true; }
     }
 
+    // Without OPEN_REPARSE_POINT, Windows opens the link's target instead of the link, so the tag can't be read.
+    private const uint FileFlagBackupSemantics = 0x02000000;
+    private const uint FileFlagOpenReparsePoint = 0x00200000;
+
     private static uint GetReparseTag(string path)
     {
-        using Microsoft.Win32.SafeHandles.SafeFileHandle handle = CreateFile(path, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
+        using Microsoft.Win32.SafeHandles.SafeFileHandle handle = CreateFile(path, 0, 7, IntPtr.Zero, 3, FileFlagBackupSemantics | FileFlagOpenReparsePoint, IntPtr.Zero);
         if (handle.IsInvalid) return 0;
-        var buffer = new byte[8];
+        var buffer = new byte[16 * 1024]; // the call fails with "more data" if this is smaller than the whole reparse record
         return DeviceIoControl(handle, 0x000900A8, IntPtr.Zero, 0, buffer, buffer.Length, out _, IntPtr.Zero) ? BitConverter.ToUInt32(buffer, 0) : 0;
     }
 
