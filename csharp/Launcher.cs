@@ -47,6 +47,31 @@ internal static class Launcher
         return Start(start, "Could not start the shell.");
     }
 
+    /// <summary>Opens a file with the system's default application.
+    /// Programs and scripts are never run from here: for those, the file is shown in the file manager instead.</summary>
+    public static string? OpenFile(string path, out bool revealedInstead)
+    {
+        revealedInstead = false;
+        if (!File.Exists(path)) return "That file no longer exists.";
+        if (RunnableExtensions.Contains(Path.GetExtension(path)))
+        {
+            revealedInstead = true;
+            return Reveal(path);
+        }
+
+        ProcessStartInfo start = OperatingSystem.IsWindows() ? new ProcessStartInfo(path) { UseShellExecute = true }
+            : OperatingSystem.IsMacOS() ? new ProcessStartInfo("open") { ArgumentList = { path } }
+            : new ProcessStartInfo("xdg-open") { ArgumentList = { path } };
+        return Start(start, "Could not open the file.");
+    }
+
+    private static readonly HashSet<string> RunnableExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".exe", ".com", ".scr", ".bat", ".cmd", ".ps1", ".psm1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".hta",
+        ".msi", ".msp", ".lnk", ".url", ".reg", ".cpl", ".jar", ".appref-ms", ".application", ".gadget",
+        ".sh", ".command", ".app", ".pkg", ".run", ".bin", ".desktop",
+    };
+
     /// <summary>Shows the file or folder in Explorer / Finder / the default file manager.</summary>
     public static string? Reveal(string path)
     {

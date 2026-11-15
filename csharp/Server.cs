@@ -124,6 +124,13 @@ internal static class DiskSpaceServer
                 string? error = Launcher.Reveal(path);
                 return error is null ? Results.Ok(new { opened = true }) : Results.BadRequest(new { error });
             });
+            app.MapPost("/api/open", (HttpRequest http, PathRequest request) =>
+            {
+                string? path = ResolveWithinScan(Get(http), request.Path);
+                if (path is null) return Results.BadRequest(new { error = "That path is not part of this scan." });
+                string? error = Launcher.OpenFile(path, out bool revealed);
+                return error is null ? Results.Ok(new { opened = !revealed, revealed }) : Results.BadRequest(new { error });
+            });
             app.MapPost("/api/shell", (HttpRequest http, PathRequest request) =>
             {
                 string? path = ResolveWithinScan(Get(http), request.Path);

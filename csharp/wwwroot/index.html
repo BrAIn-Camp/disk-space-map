@@ -621,6 +621,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
           label(tile, tsrc, t.x1 - t.x0, t.y1 - t.y0);
           if (tsrc.c) goes.set(tile, () => drill([...chain, tsrc]));
           else if (!tsrc.o && !tsrc.k) goes.set(tile, () => drill(chain));
+          if (tsrc.k) goes.set(tile, openFile(joinPath(gpath, tsrc.n)));
           info.set(tile, describe(tsrc, tsrc.o ? gpath : joinPath(gpath, tsrc.n), end.s));
           map.append(tile);
         }
@@ -629,7 +630,8 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
         tile.style.setProperty('--col', col);
         if (src.o) tile.classList.add('other');
         if (src.u) tile.classList.add('locked');
-        if (!src.c) tile.classList.add('leaf');
+        if (!src.c && !src.k) tile.classList.add('leaf');
+        if (src.k) goes.set(tile, openFile(gpath));
         place(tile, g);
         label(tile, src, w, h);
         info.set(tile, describe(src, src.o || src.u ? base : gpath, node.s));
@@ -651,14 +653,15 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
       const row = el('button', 'row');
       row.style.setProperty('--col', colorOf(c, slots));
       if (c.u) row.classList.add('locked');
-      if (!c.c) row.classList.add('nodrill');
+      if (!c.c && !c.k) row.classList.add('nodrill');
       const track = el('div', 'track');
       const fill = el('div', 'fill');
       fill.style.width = (c.s / kids[0].s) * 100 + '%';
       track.append(fill);
       row.append(el('span', 'sw'), el('span', 'nm', c.n), el('span', 'sz', fmt(c.s) + ' · ' + pct(c.s, node.s)), track);
-      row.title = c.k ? 'File' : c.c ? 'Open ' + c.n : c.n;
+      row.title = c.k ? 'Open file' : c.c ? 'Open ' + c.n : c.n;
       if (c.c) goes.set(row, () => drill(chainOf(c)));
+      else if (c.k) goes.set(row, openFile(joinPath(curPath(), c.n)));
       info.set(row, describe(c, isSpecial(c) ? curPath() : joinPath(curPath(), c.n), node.s));
       list.append(row);
     }
@@ -728,6 +731,17 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
       const r = await fetch(url + q, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!r.ok) toast((await r.json().catch(() => ({}))).error || 'That did not work.');
     } catch (e) { toast('Could not reach the server.'); }
+  }
+  // Returns a click handler that opens the file with its default app (programs/scripts are shown in the file manager instead).
+  function openFile(path) {
+    return async () => {
+      try {
+        const r = await fetch('/api/open' + q, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) toast(j.error || 'Could not open the file.');
+        else if (j.revealed) toast('Programs and scripts are not run from here, so it was shown in the file manager.');
+      } catch (e) { toast('Could not reach the server.'); }
+    };
   }
   async function copyText(text, what) {
     try { await navigator.clipboard.writeText(text); toast('Copied ' + what); }
@@ -812,7 +826,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
     const shells = caps.shells || [];
     const launch = (s) => () => post('/api/shell', { path: dir, shell: s.id });
     const items = [];
-    if (!d.noOpen) items.push({ label: 'Open', bold: true, disabled: !go, run: go });
+    if (!d.noOpen) items.push({ label: isFile ? 'Open file' : 'Open', bold: true, disabled: !go, run: go });
     items.push(
       { label: 'Open ' + where + 'in new tab', hint: MOD + '+click', run: () => openScan(dir, 'tab') },
       { label: 'Open ' + where + 'in new window', hint: 'Shift+click', run: () => openScan(dir, 'window') },
@@ -903,13 +917,15 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; backgrou
     c3.append(copy);
     tr.append(cell, el('td', 'r num', fmt(size)), c3);
     tr.tabIndex = 0;
-    tr.title = 'Right-click for actions on this file\'s folder';
-    const fileD = { n: { k: 1 }, path, noOpen: true };
-    tr.addEventListener('contextmenu', (ev) => { ev.preventDefault(); openMenu(fileD, null, ev, tr); });
+    tr.title = 'Click to open this file. Right-click for more actions.';
+    const fileD = { n: { k: 1 }, path };
+    const go = openFile(path);
+    tr.addEventListener('contextmenu', (ev) => { ev.preventDefault(); openMenu(fileD, go, ev, tr); });
     tr.addEventListener('click', (ev) => {
       if (ev.target.closest('button')) return;
       if (ev.ctrlKey || ev.metaKey) openScan(parentOf(path), 'tab');
       else if (ev.shiftKey) openScan(parentOf(path), 'window');
+      else go();
     });
     tbody.append(tr);
   }
