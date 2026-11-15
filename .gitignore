@@ -3,3 +3,6 @@ disk-data.js
 
 .claude/
 __pycache__/
+
+**/obj/
+**/bin/
