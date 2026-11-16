@@ -7,7 +7,8 @@ namespace DiskSpaceMap;
 /// </summary>
 internal static class MediaTypes
 {
-    public sealed record Entry(string Kind, string ContentType);
+    /// <summary>Convert is true for formats browsers can't show, which the server converts to JPEG first.</summary>
+    public sealed record Entry(string Kind, string ContentType, bool Convert = false);
 
     private static readonly Dictionary<string, Entry> Map = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -18,6 +19,8 @@ internal static class MediaTypes
         [".webp"] = new("image", "image/webp"),
         [".bmp"] = new("image", "image/bmp"),
         [".avif"] = new("image", "image/avif"),
+        [".heic"] = new("image", "image/jpeg", Convert: true),
+        [".heif"] = new("image", "image/jpeg", Convert: true),
         [".ico"] = new("image", "image/x-icon"),
         [".svg"] = new("image", "image/svg+xml"),
 

@@ -51,6 +51,8 @@
     let media;
     if (opts.kind === 'image') {
       media = el('img');
+      const wait = el('div', 'dsm-msg', 'Loading\u2026 (HEIC photos are converted the first time you open them)');
+      if (/\.hei[cf]$/i.test(opts.path)) { box.append(wait); media.style.display = 'none'; media.onload = () => { wait.remove(); media.style.display = ''; }; }
       media.alt = opts.path.split(/[\\/]/).pop();
       media.onerror = explain;
       media.onclick = () => {

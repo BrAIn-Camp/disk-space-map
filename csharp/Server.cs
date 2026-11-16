@@ -36,6 +36,7 @@ internal static class DiskSpaceServer
         Directory.CreateDirectory(DataDirectory);
         string snapshotDirectory = Path.Combine(DataDirectory, "scans");
         Directory.CreateDirectory(snapshotDirectory);
+        HeicConverter.CleanCache();
 
         // Only one server per user: whoever holds this lock file is the server.
         FileStream lockFile;
@@ -113,7 +114,7 @@ internal static class DiskSpaceServer
                 preview = MediaTypes.Kinds,
             });
             // Streams a previewable file (image, video, audio, PDF) to the browser, with range support so video can seek.
-            app.MapGet("/api/file", (HttpContext context) =>
+            app.MapGet("/api/file", async (HttpContext context) =>
             {
                 ScanSession? session = Get(context.Request);
                 string? path = ResolveWithinScan(session, context.Request.Query["path"]);
@@ -121,6 +122,14 @@ internal static class DiskSpaceServer
                 if (!MediaTypes.TryGet(Path.GetExtension(path), out MediaTypes.Entry? type)) return Results.BadRequest(new { error = "That file type can't be previewed." });
                 if (!File.Exists(path)) return Results.NotFound(new { error = "That file no longer exists." });
                 if (PassesThroughLink(RootOf(session!.Data!), path)) return Results.BadRequest(new { error = "Links are not followed." });
+
+                string servePath = path;
+                if (type.Convert)
+                {
+                    (string? converted, string? convertError) = await HeicConverter.GetJpegAsync(path, context.RequestAborted);
+                    if (converted is null) return Results.BadRequest(new { error = convertError });
+                    servePath = converted;
+                }
 
                 IHeaderDictionary headers = context.Response.Headers;
                 headers["X-Content-Type-Options"] = "nosniff";
@@ -130,7 +139,7 @@ internal static class DiskSpaceServer
                 // If the file is ever opened directly, nothing in it (e.g. an SVG with a script) may run. PDFs are excluded because the
                 // browser's PDF viewer does not work inside a sandbox; it runs in its own isolated context.
                 if (type.Kind != "pdf") headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
-                try { return Results.Stream(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete), type.ContentType, enableRangeProcessing: true); }
+                try { return Results.Stream(new FileStream(servePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete), type.ContentType, enableRangeProcessing: true); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return Results.BadRequest(new { error = "The file could not be read." }); }
             });
             app.MapPost("/api/reveal", (HttpRequest http, PathRequest request) =>
