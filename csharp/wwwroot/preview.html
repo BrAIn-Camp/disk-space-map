@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview</title>
+<style>
+:root { color-scheme: light dark; --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --grid: #e1e0d9; --axis: #c3c2b7; }
+@media (prefers-color-scheme: dark) { :root { --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --grid: #2c2c2a; --axis: #383835; } }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { display: flex; flex-direction: column; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: var(--surface); border-bottom: 1px solid var(--axis); flex-wrap: wrap; }
+.title { min-width: 0; flex: 1; }
+.title b { display: block; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title span { display: block; color: var(--ink-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button { font: inherit; color: var(--ink); background: none; border: 1px solid var(--axis); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button:hover { background: var(--grid); }
+main { flex: 1; min-height: 0; padding: 12px; }
+#msg { color: var(--ink-2); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <div class="title"><b id="name"></b><span id="dir"></span></div>
+  <span id="msg" role="status"></span>
+  <button id="open">Open</button>
+  <button id="reveal">Show in file manager</button>
+  <button id="copy">Copy path</button>
+</div>
+<main id="stage"></main>
+<script src="/viewer.js"></script>
+<script>
+(async function () {
+  const $ = (s) => document.querySelector(s);
+  const params = new URLSearchParams(location.search);
+  const scan = params.get('scan') || '';
+  const path = params.get('path') || '';
+  const q = scan ? '?scan=' + encodeURIComponent(scan) : '';
+  const msg = (t) => { $('#msg').textContent = t; clearTimeout(msg.t); if (t) msg.t = setTimeout(() => { $('#msg').textContent = ''; }, 3000); };
+  const cut = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
+  $('#name').textContent = path.slice(cut + 1) || 'Preview';
+  $('#dir').textContent = path.slice(0, cut + 1);
+  document.title = (path.slice(cut + 1) || 'Preview') + ' - Disk Space Map';
+
+  const caps = await fetch('/api/capabilities').then((r) => r.json()).catch(() => ({ preview: {} }));
+  $('#reveal').textContent = caps.fileManager || 'Show in file manager';
+  const ext = path.includes('.') ? path.slice(path.lastIndexOf('.')).toLowerCase() : '';
+  $('#stage').append(window.DsmViewer.create({ scan, path, kind: (caps.preview || {})[ext] }));
+
+  const post = async (url) => {
+    try {
+      const r = await fetch(url + q, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) msg(j.error || 'That did not work.');
+      else if (j.revealed) msg('Programs and scripts are not run from here, so it was shown in the file manager.');
+    } catch (e) { msg('Could not reach the server.'); }
+  };
+  $('#open').onclick = () => post('/api/open');
+  $('#reveal').onclick = () => post('/api/reveal');
+  $('#copy').onclick = async () => { try { await navigator.clipboard.writeText(path); msg('Copied path'); } catch (e) { msg('Copy failed'); } };
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') window.close(); });
+})();
+</script>
+</body>
+</html>

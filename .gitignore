@@ -9,3 +9,6 @@ dist/
 
 .claude/
 __pycache__/
+
+**/obj/
+**/bin/
